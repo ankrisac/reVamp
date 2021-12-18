@@ -1,17 +1,12 @@
 package src;
 
-import java.io.IOException;
-import java.util.*;
-
-import org.lwjgl.glfw.*;
-import org.lwjgl.opengl.GL;
-
-import src.SGFX.*;
-import src.SGFX.BufAttrib;
-import src.SGFX.BufIndex;
-
 import static org.lwjgl.opengl.GL43C.*;
 
+import java.io.IOException;
+import java.util.*;
+import org.lwjgl.glfw.*;
+import org.lwjgl.opengl.GL;
+import src.SGFX.*;
 
 class FontAtlas implements Resource, Bindable {
     public final Tex2D atlas;
@@ -27,8 +22,8 @@ class FontAtlas implements Resource, Bindable {
 
     public FontAtlas() {
         sampler = new Sampler(Tex.Dim.D2)
-                .filter(new TexFilter(TexFilter.Fn.Nearest, TexFilter.Fn.Nearest, TexFilter.MipMap.None))
-                .wrap(new TexWrap(TexWrap.Axis.ClampBorder, TexWrap.Axis.ClampBorder));
+                      .filter(new TexFilter(TexFilter.Fn.Nearest, TexFilter.Fn.Nearest, TexFilter.MipMap.None))
+                      .wrap(new TexWrap(TexWrap.Axis.ClampBorder, TexWrap.Axis.ClampBorder));
 
         atlas = new Tex2D();
         atlas.load("assets/Termfont.png", false);
@@ -41,7 +36,7 @@ class FontAtlas implements Resource, Bindable {
 
         glyph_x = size[0] / Nx;
         glyph_y = size[1] / Ny;
-        ratio = (float) glyph_y / (float) glyph_x;
+        ratio = (float)glyph_y / (float)glyph_x;
     }
 
     public void destroy() {
@@ -65,7 +60,7 @@ class TextMesh implements Resource {
     private BufAttrib cell_uv;
     private BufAttrib cell_id;
 
-    private VertexArray layout;
+    private BindGroup layout;
 
     public TextMesh() {
         ibo = new BufIndex(BufFmt.Block(BufFmt.Type.U32, 1, BufFmt.Usage.Draw));
@@ -74,7 +69,7 @@ class TextMesh implements Resource {
         cell_uv = new BufAttrib(BufFmt.Block(BufFmt.Type.I32, 2, BufFmt.Usage.MutDraw));
         cell_id = new BufAttrib(BufFmt.Block(BufFmt.Type.I32, 2, BufFmt.Usage.MutDraw));
 
-        layout = new VertexArray();
+        layout = new BindGroup();
         layout.attach(0, vert);
         layout.attach(1, cell_uv);
         layout.attach(2, cell_id);
@@ -90,17 +85,17 @@ class TextMesh implements Resource {
     }
 
     public void draw() {
-        layout.draw(VertexArray.DrawMode.Tris, ibo);
+        layout.draw(BindGroup.DrawMode.Tris, ibo);
     }
 
     public void resize(int Nx, int Ny, float dx, float dy) {
         int N = Nx * Ny;
 
         int[][] cell_off = {
-                { 0, 1 },
-                { 1, 1 },
-                { 1, 0 },
-                { 0, 0 },
+            {0, 1},
+            {1, 1},
+            {1, 0},
+            {0, 0},
         };
         int cell_len = cell_off.length;
         float[] data_vert = new float[cell_len * vert.fmt.dim * N];
@@ -108,9 +103,8 @@ class TextMesh implements Resource {
         int[] data_cell_id = new int[cell_len * cell_id.fmt.dim * N];
 
         int[] cell_index = {
-                0, 3, 1,
-                1, 3, 2
-        };
+            0, 3, 1,
+            1, 3, 2};
         int[] data_ind = new int[cell_index.length * N];
 
         int i_attrib = 0;
@@ -321,7 +315,8 @@ class Terminal implements Resource {
 
         {
             List<String> lines = new ArrayList<>();
-            outer: for (StringBuilder line : text.prev) {
+        outer:
+            for (StringBuilder line : text.prev) {
                 for (String wline : line.toString().split("\n")) {
                     if (line_limit > 0)
                         break outer;
@@ -336,7 +331,8 @@ class Terminal implements Resource {
 
         {
             List<String> lines = new ArrayList<>();
-            outer: for (StringBuilder line : text.next) {
+        outer:
+            for (StringBuilder line : text.next) {
                 for (String wline : line.toString().split("\n")) {
                     if (line_limit > 0)
                         break outer;
@@ -355,8 +351,8 @@ class Terminal implements Resource {
 
         Nx = w / (font_size * atlas.glyph_x);
         dx = 2.0f / Nx;
-        dy = dx * atlas.ratio * (float) w / (float) h;
-        Ny = (int) (2.0f / dy) + 1;
+        dy = dx * atlas.ratio * (float)w / (float)h;
+        Ny = (int)(2.0f / dy) + 1;
 
         cx = 0;
         cy = 0;
@@ -366,9 +362,9 @@ class Terminal implements Resource {
     }
 
     public void writeAt(char chr, int cx, int cy) {
-        int val = (int) chr;
+        int val = (int)chr;
 
-        int[] data = { val % atlas.Nx, val / atlas.Nx };
+        int[] data = {val % atlas.Nx, val / atlas.Nx};
         int offset = 8 * (cx + Nx * cy); // I32;
 
         glyph_buffer.subload(offset, data);
@@ -376,16 +372,16 @@ class Terminal implements Resource {
 
     public void write(char chr) {
         switch (chr) {
-            case '\r':
-                cx = 0;
-                break;
-            case '\n':
-                next();
-                break;
-            default: {
-                writeAt(chr, cx, cy);
-                break;
-            }
+        case '\r':
+            cx = 0;
+            break;
+        case '\n':
+            next();
+            break;
+        default: {
+            writeAt(chr, cx, cy);
+            break;
+        }
         }
 
         cx++;
@@ -473,7 +469,7 @@ public class Main {
             });
             GLFW.glfwSetCharCallback(win.handle, (window, codepoint) -> {
                 if (codepoint < 128) {
-                    term.write((char) codepoint);
+                    term.write((char)codepoint);
                 } else {
                     term.write('\\');
                     term.write('?');
@@ -483,32 +479,31 @@ public class Main {
             GLFW.glfwSetKeyCallback(win.handle, (window, key, scancode, action, mod) -> {
                 if (action == GLFW.GLFW_PRESS || action == GLFW.GLFW_REPEAT) {
                     switch (key) {
-                        case GLFW.GLFW_KEY_BACKSPACE:
-                        case GLFW.GLFW_KEY_DELETE:
-                            term.pop();
-                            break;
-                        case GLFW.GLFW_KEY_ENTER:
-                            term.next();
-                            break;
-                        case GLFW.GLFW_KEY_UP:
-                            term.up();
-                            break;
-                        case GLFW.GLFW_KEY_DOWN:
-                            term.down();
-                            break;
-                        case GLFW.GLFW_KEY_LEFT:
-                            term.left();
-                            break;
-                        case GLFW.GLFW_KEY_RIGHT:
-                            term.right();
-                            break;
-                        case GLFW.GLFW_KEY_ESCAPE: {
-                            toggle_fill();
-                            break;
-                        }
-                        default:
-                            break;
-
+                    case GLFW.GLFW_KEY_BACKSPACE:
+                    case GLFW.GLFW_KEY_DELETE:
+                        term.pop();
+                        break;
+                    case GLFW.GLFW_KEY_ENTER:
+                        term.next();
+                        break;
+                    case GLFW.GLFW_KEY_UP:
+                        term.up();
+                        break;
+                    case GLFW.GLFW_KEY_DOWN:
+                        term.down();
+                        break;
+                    case GLFW.GLFW_KEY_LEFT:
+                        term.left();
+                        break;
+                    case GLFW.GLFW_KEY_RIGHT:
+                        term.right();
+                        break;
+                    case GLFW.GLFW_KEY_ESCAPE: {
+                        toggle_fill();
+                        break;
+                    }
+                    default:
+                        break;
                     }
                 }
             });

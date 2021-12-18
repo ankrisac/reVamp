@@ -1,7 +1,7 @@
 package src.SGFX;
 import static org.lwjgl.opengl.GL43C.*;
 
-public class VertexArray extends GL_Bindable {
+public class BindGroup extends GL_Bindable {
     public enum DrawMode {
         Tris(GL_TRIANGLES),
         TrisStrip(GL_TRIANGLE_STRIP);
@@ -13,7 +13,7 @@ public class VertexArray extends GL_Bindable {
         }
     }
 
-    public VertexArray() {
+    public BindGroup() {
         super(glGenVertexArrays());
     }
 
