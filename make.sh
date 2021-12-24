@@ -3,8 +3,10 @@
 rm -rf .class
 mkdir -p .class
 
-javac template/*.java  -d .class
-java -classpath ".class" template.Main
-
-javac -classpath "lib/lwjgl/*" src/*.java src/SGFX/*.java src/Vec/*.java -d .class
-java -classpath ".class:lib/lwjgl/*" src.Main
+if javac template/*.java  -d .class; then 
+    if java -classpath ".class" template.Main; then
+        if javac -classpath "lib/lwjgl/*" src/*.java src/SGFX/*.java src/Vec/*.java -d .class; then
+            java -classpath ".class:lib/lwjgl/*" src.Main
+        fi
+    fi
+fi 

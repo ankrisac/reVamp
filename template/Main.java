@@ -1,450 +1,24 @@
 package template;
 
-import java.util.ArrayList;
-
 import java.nio.file.*;
-import java.io.IOException;
 
-class Symbol {
-    public final String name;
-
-    Symbol(String name) {
-        this.name = name;
-    }
-}
-
-class Type extends Symbol {
-    public static Type Void = Type.of("void");
-    public static Type Size = Type.of("int");
-    public static Type I32 = Type.of("int");
-    public static Type F32 = Type.of("floats");
-
-    Type(String name) {
-        super(name);
-    }
-
-    public static Type of(String name) {
-        return new Type(name);
-    }
-
-    public Var var(String name) {
-        return Var.of(this, name);
-    }
-
-    public VarList vars(String... names) {
-        return VarList.of(this, names);
-    }
-}
-
-class Var extends Symbol {
-    public final Type type;
-
-    Var(Type type, String name) {
-        super(name);
-        this.type = type;
-    }
-
-    public static Var of(Type type, String name) {
-        return new Var(type, name);
-    }
-
-    public static Var of(String type, String name) {
-        return new Var(Type.of(type), name);
-    }
-
-    public String def() {
-        return this.type.name + " " + this.name;
-    }
-
-    public String let(String value) {
-        return def() + " = " + value;
-    }
-
-    public VarList lst() {
-        return VarList.of(this);
-    }
-}
-
-class VarList {
-    public final Var[] vars;
-    public final int len;
-
-    public VarList(Var... vars) {
-        this.vars = vars;
-        this.len = vars.length;
-    }
-
-    public static VarList of(Var... args) {
-        return new VarList(args);
-    }
-
-    public static VarList of(Type type, String... names) {
-        Var[] args = new Var[names.length];
-        for (int i = 0; i < names.length; i++) {
-            args[i] = Var.of(type, names[i]);
-        }
-        return new VarList(args);
-    }
-
-    interface MapStr {
-        public String apply(Var var);
-    }
-
-    interface IMapStr {
-        public String apply(int index, Var var);
-    }
-
-    public String mapjoin(String sep, IMapStr fn) {
-        String out = "";
-        int len = this.len - 1;
-        if (len < 0) {
-            return out;
-        }
-        for (int i = 0; i < len; i++) {
-            out += fn.apply(i, vars[i]) + sep;
-        }
-        return out + fn.apply(len, vars[len]);
-    }
-
-    public String mapjoin(String sep, MapStr fn) {
-        return mapjoin(sep, (i, x) -> fn.apply(x));
-    }
-
-    public String mapjoin(MapStr fn) {
-        return mapjoin("", fn);
-    }
-
-    public String mapjoin(IMapStr fn) {
-        return mapjoin("", fn);
-    }
-
-    public String maptuple(MapStr map) {
-        return "(" + mapjoin(", ", map) + ")";
-    }
-
-    public String maptuple(IMapStr map) {
-        return "(" + mapjoin(", ", map) + ")";
-    }
-
-    interface MapNode {
-        public Node apply(Var in);
-    }
-
-    interface IMapNode {
-        public Node apply(int index, Var in);
-    }
-
-    public Node[] map(IMapNode map) {
-        Node[] out = new Node[len];
-        for (int i = 0; i < len; i++) {
-            out[i] = map.apply(i, vars[i]);
-        }
-        return out;
-    }
-
-    public Node[] map(MapNode map) {
-        return map((i, x) -> map.apply(x));
-    }
-
-    interface MapEffect {
-        public void apply(Var in);
-    }
-
-    interface IMapEffect {
-        public void apply(int index, Var in);
-    }
-
-    public void foreach(IMapEffect map) {
-        for (int i = 0; i < len; i++) {
-            map.apply(i, vars[i]);
-        }
-    }
-
-    public void foreach(MapEffect map) {
-        foreach((i, x) -> map.apply(x));
-    }
-
-    public Type getScalar() {
-        if (len == 0) {
-            throw new RuntimeException("Empty VarList has no Scalar");
-        }
-        Type scalar = vars[0].type;
-        for (Var var : vars) {
-            if (scalar.name != var.type.name) {
-                throw new RuntimeException("VarList has multiple types, so Scalar does not exist");
-            }
-        }
-        return scalar;
-    }
-}
-
-abstract class Node {
-    static String tab = "    ";
-    static String newline = "\n";
-
-    final public String getIndent(int indent) {
-        String out = "";
-        for (int i = 0; i < indent; i++) {
-            out += tab;
-        }
-        return out;
-    }
-
-    abstract public String to_str(int indent, String mod);
-
-    final public String to_str(int indent) {
-        return to_str(indent, "");
-    }
-
-    public static Node[] concat(Node[] a, Node[] b) {
-        Node[] total = new Node[a.length + b.length];
-        int i = 0;
-        for (Node elem : a) {
-            total[i++] = elem;
-        }
-        for (Node elem : b) {
-            total[i++] = elem;
-        }
-        return total;
-    }
-}
-
-class Ln extends Node {
-    public final String line;
-
-    public Ln(String line) {
-        this.line = line;
-    }
-
-    public static Ln of(String begin, String... lines) {
-        String out = begin;
-        for (String ln : lines) {
-            out += ln;
-        }
-        out += ";";
-        return new Ln(out);
-    }
-
-    public static Ln ret(String... lines) {
-        return Ln.of("return ", lines);
-    }
-
-    public static Ln text(String... lines) {
-        String out = "";
-        for (String ln : lines) {
-            out += ln;
-        }
-        return new Ln(out);
-    }
-
-    public String to_str(int indent, String mod) {
-        return getIndent(indent) + mod + this.line;
-    }
-}
-
-class Block extends Node {
-    public ArrayList<Node> members;
-    public final String name;
-
-    public Block(String name) {
-        members = new ArrayList<Node>();
-        this.name = name;
-    }
-
-    public void add(Node node) {
-        members.add(node);
-    }
-
-    public void add(Node... nodes) {
-        for (Node node : nodes) {
-            members.add(node);
-        }
-    }
-
-    public String to_str(int indent, String mod) {
-        String out = getIndent(indent) + mod + name + " {" + newline;
-        int len = members.size() - 1;
-        if (len >= 0) {
-            for (int i = 0; i < len; i++) {
-                out += members.get(i).to_str(indent + 1, "") + newline;
-            }
-            out += members.get(len).to_str(indent + 1, "") + newline;
-        }
-        return out + getIndent(indent) + "}";
-    }
-
-    public static Block of(String name, Node... inner) {
-        Block out = new Block(name);
-        for (Node node : inner) {
-            out.add(node);
-        }
-        return out;
-    }
-
-    public static Block Cond(String name, String cond, Node... inner) {
-        return Block.of(name + " (" + cond + ")", inner);
-    }
-
-    public static Block If(String cond, Node... inner) {
-        return Block.Cond("if", cond, inner);
-    }
-
-    public static Block ElseIf(String cond, Node... inner) {
-        return Block.Cond("else if", cond, inner);
-    }
-
-    public static Block Else(String cond, Node... inner) {
-        return Block.of("else", inner);
-    }
-
-    public static Block While(String cond, Node... inner) {
-        return Block.Cond("while", cond, inner);
-    }
-}
-
-class Fn extends Node {
-    public final String name;
-    public final VarList args;
-    public final Type output;
-    public final Block body;
-
-    Fn(String name, Type output, VarList args, Node... inner) {
-        this.name = name;
-        this.output = output;
-        this.args = args;
-
-        String header = output.name;
-        if (name.length() > 0) {
-            header += " " + name;
-        }
-        header += args.maptuple(x -> x.def());
-
-        this.body = new Block(header);
-        this.body.add(inner);
-    }
-
-    public static Fn of(String name, Type output, VarList args, Node... inner) {
-        return new Fn(name, output, args, inner);
-    }
-
-    public String to_str(int indent, String mod) {
-        return body.to_str(indent, mod);
-    }
-}
-
-class Class extends Node {
-    public static class Member extends Node {
-        boolean m_public;
-        boolean m_static;
-        boolean m_final;
-        boolean m_abstract;
-        Node node;
-
-        Member(Var var) {
-            this.node = Ln.of(var.def());
-            m_public = true;
-            m_static = false;
-            m_final = false;
-            m_abstract = false;
-        }
-
-        Member(Node node) {
-            this.node = node;
-            m_public = true;
-            m_static = false;
-            m_final = false;
-            m_abstract = false;
-        }
-
-        public Member set_private() {
-            m_public = false;
-            return this;
-        }
-
-        public Member set_static() {
-            m_static = true;
-            return this;
-        }
-
-        public Member set_final() {
-            m_final = true;
-            return this;
-        }
-
-        public Member set_abstract() {
-            m_abstract = true;
-            return this;
-        }
-
-        public String to_str(int indent, String mod) {
-            if (m_public) {
-                mod += "public ";
-            }
-            if (m_abstract) {
-                mod += "abstract ";
-            }
-            if (m_static) {
-                mod += "static ";
-            }
-            if (m_final) {
-                mod += "final ";
-            }
-            return node.to_str(indent, mod);
-        }
-    }
-
-    public final String name;
-    public final Block body;
-
-    public Class(String name) {
-        this.name = name;
-        this.body = new Block("class " + name);
-    }
-
-    public void add(Member node) {
-        body.add(node);
-    }
-
-    public void add(Node node) {
-        body.add(new Member(node));
-    }
-
-    public void add_var(Var var) {
-        add(Ln.of(var.def()));
-    }
-
-    public void add_class(Class _class) {
-        add(new Member(_class).set_static());
-    }
-
-    public void add_mk(VarList args, Node... inner) {
-        add(Fn.of("", getType(), args, inner));
-    }
-
-    public String to_str(int indent, String mod) {
-        return body.to_str(indent, mod);
-    }
-
-    public Type getType() {
-        return new Type(name);
-    }
-}
+import template.cons.*;
 
 class TemplateVec {
     public final VarList comps;
     public final Type type;
     public final Type scalar;
-    public final Class body;
+    public final Struct struct;
 
     public TemplateVec(String name, VarList comps) {
         this.comps = comps;
-        this.body = new Class(name);
-        this.type = body.getType();
+        this.struct = new Struct(name);
+        this.type = struct.getType();
         this.scalar = comps.getScalar();
     }
 
-    public Class compile_arr() {
-        Class out = new Class("Arr");
+    public Struct compile_arr() {
+        Struct out = new Struct("Arr");
         Var data = Type.of(scalar.name + "[]").var("data");
 
         String new_arr = "new " + scalar.name + "[" + comps.len + " * N]";
@@ -464,9 +38,9 @@ class TemplateVec {
             out.add(Fn.of("resize", Type.Void, Type.Size.vars("N"), block));
         }
         {
-            Node fbody = Ln.of("System.arraycopy(other.data, " + comps.len, " * index + offset, data, 0, other.size())");
+            Node body = Ln.of("System.arraycopy(other.data, " + comps.len, " * index + offset, data, 0, other.size())");
             VarList args = VarList.of(out.getType().var("other"), Type.Size.var("index"), Type.Size.var("offset"));
-            out.add(Fn.of("set", Type.Void, args, fbody));
+            out.add(Fn.of("set", Type.Void, args, body));
         }
 
         {
@@ -483,15 +57,15 @@ class TemplateVec {
         return out;
     }
 
-    public Class compile_buf() {
-        Class out = new Class("Buf");
+    public Struct compile_buf() {
+        Struct out = new Struct("Buf");
         return out;
     }
 
     private void fnPair(Fn fn) {
-        Ln copy_body = Ln.ret("this.copy().", fn.name, fn.args.maptuple(x -> x.name));
-        body.add(fn);
-        body.add(Fn.of("c" + fn.name, fn.output, fn.args, copy_body));
+        Ln body = Ln.ret("this.copy().", fn.name, fn.args.maptuple(x -> x.name));
+        struct.add(fn);
+        struct.add(Fn.of("c" + fn.name, fn.output, fn.args, body));
     }
 
     private void fn_comp(String name, VarList args, VarList.MapNode fn) {
@@ -500,26 +74,33 @@ class TemplateVec {
     }
 
     private void fn_op(String name, String op) {
-        VarList.MapNode fn = x -> Ln.of("this.", x.name, " ", op, "= other.", x.name);
-        fn_comp(name, type.vars("other"), fn);
+        {
+            VarList.MapNode fn = x -> Ln.of("this.", x.name, " ", op, "= other.", x.name);
+            fn_comp(name, type.vars("other"), fn);    
+        }
+
+        {
+            VarList.MapNode fn = x -> Ln.of("this.", x.name, " ", op, "= ", x.name);
+            fn_comp(name, comps, fn);    
+        }
     }
 
     public void fn_vec(String name, VarList args, Node... body) {
-        this.body.add(Fn.of(name, type, args, body));
+        this.struct.add(Fn.of(name, type, args, body));
     }
 
     public void fn_scalar(String name, VarList args, Node... body) {
-        this.body.add(Fn.of(name, scalar, args, body));
+        this.struct.add(Fn.of(name, scalar, args, body));
     }
 
-    public Class compile() {
-        comps.foreach(x -> body.add_var(x));
-        body.add_mk(comps, comps.map(x -> Ln.of("this.", x.name, " = ", x.name)));
+    public Struct compile() {
+        comps.foreach(x -> struct.add_var(x));
+        struct.add_mk(comps, comps.map(x -> Ln.of("this.", x.name, " = ", x.name)));
 
         {
             Node fbody = Ln.ret("new ", type.name, comps.maptuple(x -> x.name));
-            body.add(new Class.Member(Fn.of("of", type, comps, fbody)).set_static());
-            body.add(Fn.of("copy", type, VarList.of(), fbody));
+            struct.add(new Struct.Member(Fn.of("of", type, comps, fbody)).set_static());
+            struct.add(Fn.of("copy", type, VarList.of(), fbody));
         }
 
         fn_op("add", "+");
@@ -560,55 +141,50 @@ class TemplateVec {
             }
         }
 
-        body.add_class(compile_arr());
-        return body;
+        struct.add_class(compile_arr());
+        return struct;
     }
 
-    public static void compile(String... _comps) {
-        String[] types = {
-                "int",
-                "float",
-        };
-        String[] prefix = { "i", "f" };
-        int N = _comps.length;
+    public static void compile(String... comps) {
+        int N = comps.length;
 
-        for (int i = 0; i < types.length; i++) {
+        Type i32 = Type.of("int");
+        Type f32 = Type.of("float");
 
-            String classname = prefix[i] + "vec" + N;
-            VarList args = Type.of(types[i]).vars(_comps);
+        Struct ivec = new TemplateVec("ivec" + N, i32.vars(comps)).compile();
+        Struct fvec = new TemplateVec("fvec" + N, f32.vars(comps)).compile();
 
-            TemplateVec vec = new TemplateVec(classname, args);
-            Class out = vec.compile();
+        VarList.MapStr fn = x -> "(" + x.type.name + ")" + x.name;
+        ivec.add(Fn.of("f", fvec.getType(), VarList.of(), Ln.ret("new ", fvec.name, f32.vars(comps).maptuple(fn))));
+        fvec.add(Fn.of("i", ivec.getType(), VarList.of(), Ln.ret("new ", ivec.name, i32.vars(comps).maptuple(fn))));
 
-            for (int j = 0; j < types.length; j++) {
-                if (i != j) {
-                    Type output = Type.of(prefix[j] + "vec" + N);
-                    String inputs = Type.of(types[j]).vars(_comps).maptuple(x -> "(" + x.type.name + ")" + x.name);
+        {
+            VarList arg = Type.Size.vars("index");
+            String inputs = "(index, " + i32.vars(comps).mapjoin(", ", x -> x.name) + ")";
 
-                    Node ret = Ln.ret("new ", output.name, inputs);
-                    out.add(Fn.of(prefix[j], output, VarList.of(), ret));
-                }
-            }
+            ivec.add(Fn.of("gl_send", Type.Void, arg, Ln.of("glUniform" + N, "i", inputs)));    
+            fvec.add(Fn.of("gl_send", Type.Void, arg, Ln.of("glUniform" + N, "f", inputs)));    
+        }
 
-            {
-                Node ret = Ln.of("glUniform" + N + prefix[i] + "(index, " + args.mapjoin(", ", x -> x.name) + ")");
-                out.add(Fn.of("uniform", Type.Void, Type.Size.vars("index"), ret));
-            }
-
-
+        {
             String src = "package src.Vec;" + Node.newline;
             src += "import static org.lwjgl.opengl.GL43C.*;" + Node.newline;
             src += "// Generated class: Refer template/Main.java" + Node.newline;
-            src += "public " + out.to_str(0);
+            src += "public ";
 
-            try {
-                Path path = Paths.get("src", "Vec", classname + ".java");
-                Files.write(path, src.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-            }
-            catch (Exception ex) {
-                System.out.println("Failed: " + classname);
-                System.out.println(ex.getMessage());
-            }
+            write(src + ivec.to_str(0), ivec.name);
+            write(src + fvec.to_str(0), fvec.name);
+        }
+    }
+
+    public static void write(String src, String filename) {
+        try {
+            Path path = Paths.get("src", "Vec", filename + ".java");
+            Files.write(path, src.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        }
+        catch (Exception ex) {
+            System.out.println("Failed: " + filename);
+            System.out.println(ex.getMessage());
         }
     }
 }

@@ -90,8 +90,8 @@ class TextMesh implements Resource {
         layout.draw(BindGroup.DrawMode.Tris, ibo);
     }
 
-    public void resize(int Nx, int Ny, float dx, float dy) {
-        int N = Nx * Ny;
+    public void resize(ivec2 N, fvec2 ds) {
+        int n = N.prod();
 
         ivec2[] cell_off = {
                 ivec2.of(0, 1),
@@ -100,7 +100,7 @@ class TextMesh implements Resource {
                 ivec2.of(0, 0),
         };
         int cell_len = cell_off.length;
-        int num_vertex = cell_off.length * N;
+        int num_vertex = cell_off.length * n;
 
         fvec2.Arr data_vert = new fvec2.Arr(num_vertex);
         ivec2.Arr data_cell_uv = new ivec2.Arr(num_vertex);
@@ -110,24 +110,21 @@ class TextMesh implements Resource {
                 0, 3, 1,
                 1, 3, 2
         };
-        int[] data_ind = new int[cell_index.length * N];
+        int[] data_ind = new int[cell_index.length * n];
 
         int i_attrib = 0;
         int i_index = 0;
 
-        for (int j = 0; j < Ny; j++) {
-            for (int i = 0; i < Nx; i++) {
+        for (int j = 0; j < N.y; j++) {
+            for (int i = 0; i < N.x; i++) {
                 for (ivec2 off : cell_off) {
-                    float x = (i + off.x) * dx - 1.0f;
-                    float y = 1.0f + (off.y - j - 1) * dy;
-
-                    data_vert.set(i_attrib, fvec2.of(x, y));
+                    data_vert.set(i_attrib, off.f().cadd(i, -j - 1).mul(ds).add(-1, 1));
                     data_cell_uv.set(i_attrib, ivec2.of(off.x, 1 - off.y));
                     data_cell_id.set(i_attrib, ivec2.of(i, j));
                     i_attrib++;
                 }
 
-                int base = cell_len * (i + j * Nx);
+                int base = cell_len * (i + j * N.x);
                 for (int off : cell_index) {
                     data_ind[i_index++] = base + off;
                 }
@@ -221,8 +218,7 @@ class Terminal implements Resource {
     private float dx;
     private float dy;
 
-    private int cx;
-    private int cy;
+    private ivec2 cell = ivec2.of(0, 0);
 
     private int origin_y;
 
@@ -243,9 +239,6 @@ class Terminal implements Resource {
 
         origin_y = 0;
 
-        cx = 0;
-        cy = 0;
-
         mesh = new TextMesh();
         atlas = new FontAtlas();
         pipeline = new Pipeline("text-panel", "shaders/text");
@@ -263,10 +256,10 @@ class Terminal implements Resource {
     public void draw() {
         pipeline.bind();
 
-        glUniform2f(0, 1.0f / atlas.Nx, 1.0f / atlas.Ny);
+        fvec2.of(1.0f / atlas.Nx, 1.0f / atlas.Ny).gl_send(0);
         glUniform1f(1, 0.0f);
-        glUniform2i(2, Nx, Ny);
-        glUniform2i(3, 0, origin_y);
+        ivec2.of(Nx, Ny).gl_send(2);
+        ivec2.of(0, origin_y).gl_send(3);
 
         glyph_buffer.set_binding(0);
         atlas.bind();
@@ -277,41 +270,36 @@ class Terminal implements Resource {
         t = (t + 0.02f) % 1.0f;
     }
 
-    public void meshWriteLine(int data[], int j, String line) {
+    public void meshWriteLine(ivec2.Arr arr_glyph, int j, String line) {
         for (int i = 0; i < Math.min(line.length(), Nx); i++) {
             char chr = line.charAt(i);
             int index = (i + j * Nx);
-
-            data[2 * index + 0] = chr % atlas.Nx;
-            data[2 * index + 1] = chr / atlas.Nx;
+            arr_glyph.set(index, ivec2.of(chr % atlas.Nx, chr / atlas.Nx));
         }
     }
 
-    public int meshWrite(int data[], int j, List<String> lines) {
+    public int meshWrite(ivec2.Arr arr_glyph, int j, List<String> lines) {
         for (String line : lines) {
             if (j >= Ny)
                 break;
-            meshWriteLine(data, j++, line);
+            meshWriteLine(arr_glyph, j++, line);
         }
         return j;
     }
 
     public void refresh_mesh() {
         int N = Nx * Ny;
-        int data[] = new int[2 * N];
+        ivec2.Arr arr_glyph = new ivec2.Arr(N);
         {
             char space = ' ';
-            int off_x = space % atlas.Nx;
-            int off_y = space / atlas.Nx;
+            ivec2 off = ivec2.of(space % atlas.Nx, space / atlas.Nx);
 
             for (int i = 0; i < N; i++) {
-                data[2 * i + 0] = off_x;
-                data[2 * i + 1] = off_y;
+                arr_glyph.set(i, off);
             }
         }
 
         int j = 0;
-
         int line_limit = Ny;
 
         {
@@ -324,10 +312,10 @@ class Terminal implements Resource {
                 }
             }
 
-            j = meshWrite(data, j, lines);
+            j = meshWrite(arr_glyph, j, lines);
         }
 
-        meshWriteLine(data, j, ">>" + text.current.toString());
+        meshWriteLine(arr_glyph, j, ">>" + text.current.toString());
 
         {
             List<String> lines = new ArrayList<>();
@@ -339,10 +327,10 @@ class Terminal implements Resource {
                 }
             }
 
-            meshWrite(data, j + 1, lines);
+            meshWrite(arr_glyph, j + 1, lines);
         }
 
-        glyph_buffer.load(data);
+        glyph_buffer.load(arr_glyph.data);
     }
 
     public void resize(int w, int h) {
@@ -353,18 +341,18 @@ class Terminal implements Resource {
         dy = dx * atlas.ratio * (float) w / (float) h;
         Ny = (int) (2.0f / dy) + 1;
 
-        cx = 0;
-        cy = 0;
+        cell.x = 0;
+        cell.y = 0;
 
         refresh_mesh();
-        mesh.resize(Nx, Ny, dx, dy);
+        mesh.resize(ivec2.of(Nx, Ny), fvec2.of(dx, dy));
     }
 
-    public void writeAt(char chr, int cx, int cy) {
+    public void writeAt(char chr, ivec2 c) {
         int val = (int) chr;
 
         int[] data = { val % atlas.Nx, val / atlas.Nx };
-        int offset = 8 * (cx + Nx * cy); // I32;
+        int offset = 8 * (c.x + Nx * c.y); // I32;
 
         glyph_buffer.subload(offset, data);
     }
@@ -372,37 +360,37 @@ class Terminal implements Resource {
     public void write(char chr) {
         switch (chr) {
             case '\r':
-                cx = 0;
+                cell.x = 0;
                 break;
             case '\n':
                 next();
                 break;
             default: {
-                writeAt(chr, cx, cy);
+                writeAt(chr, cell);
                 break;
             }
         }
 
-        cx++;
-        if (cx >= Nx) {
+        cell.x++;
+        if (cell.x >= Nx) {
             next();
         }
     }
 
     public void pop() {
-        writeAt(' ', cx, cy); // Remove cursor also
-        if (cx > 0) {
-            cx--;
-        } else if (cy > 0) {
-            cy--;
+        writeAt(' ', cell); // Remove cursor also
+        if (cell.x > 0) {
+            cell.x--;
+        } else if (cell.y > 0) {
+            cell.y--;
         }
-        writeAt(' ', cx, cy);
+        writeAt(' ', cell);
     }
 
     public void next() {
-        writeAt(' ', cx, cy); // Remove cursor also
-        cy++;
-        cx = 0;
+        writeAt(' ', cell); // Remove cursor also
+        cell.y++;
+        cell.x = 0;
     }
 
     public void up() {
@@ -416,16 +404,16 @@ class Terminal implements Resource {
     }
 
     public void left() {
-        writeAt(' ', cx, cy);
-        if (cx > 0) {
-            cx--;
+        writeAt(' ', cell);
+        if (cell.x > 0) {
+            cell.x--;
         }
     }
 
     public void right() {
-        writeAt(' ', cx, cy);
-        if (cx < Nx - 1) {
-            cx++;
+        writeAt(' ', cell);
+        if (cell.x < Nx - 1) {
+            cell.x++;
         }
     }
 }
