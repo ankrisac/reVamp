@@ -8,6 +8,8 @@ import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.GL;
 import src.SGFX.*;
 
+import src.Vec.*;
+
 class FontAtlas implements Resource, Bindable {
     public final Tex2D atlas;
     public final Sampler sampler;
@@ -22,8 +24,8 @@ class FontAtlas implements Resource, Bindable {
 
     public FontAtlas() {
         sampler = new Sampler(Tex.Dim.D2)
-                      .filter(new TexFilter(TexFilter.Fn.Nearest, TexFilter.Fn.Nearest, TexFilter.MipMap.None))
-                      .wrap(new TexWrap(TexWrap.Axis.ClampBorder, TexWrap.Axis.ClampBorder));
+                .filter(new TexFilter(TexFilter.Fn.Nearest, TexFilter.Fn.Nearest, TexFilter.MipMap.None))
+                .wrap(new TexWrap(TexWrap.Axis.ClampBorder, TexWrap.Axis.ClampBorder));
 
         atlas = new Tex2D();
         atlas.load("assets/Termfont.png", false);
@@ -36,7 +38,7 @@ class FontAtlas implements Resource, Bindable {
 
         glyph_x = size[0] / Nx;
         glyph_y = size[1] / Ny;
-        ratio = (float)glyph_y / (float)glyph_x;
+        ratio = (float) glyph_y / (float) glyph_x;
     }
 
     public void destroy() {
@@ -91,20 +93,23 @@ class TextMesh implements Resource {
     public void resize(int Nx, int Ny, float dx, float dy) {
         int N = Nx * Ny;
 
-        int[][] cell_off = {
-            {0, 1},
-            {1, 1},
-            {1, 0},
-            {0, 0},
+        ivec2[] cell_off = {
+                ivec2.of(0, 1),
+                ivec2.of(1, 1),
+                ivec2.of(1, 0),
+                ivec2.of(0, 0),
         };
         int cell_len = cell_off.length;
-        float[] data_vert = new float[cell_len * vert.fmt.dim * N];
-        int[] data_cell_uv = new int[cell_len * cell_uv.fmt.dim * N];
-        int[] data_cell_id = new int[cell_len * cell_id.fmt.dim * N];
+        int num_vertex = cell_off.length * N;
+
+        fvec2.Arr data_vert = new fvec2.Arr(num_vertex);
+        ivec2.Arr data_cell_uv = new ivec2.Arr(num_vertex);
+        ivec2.Arr data_cell_id = new ivec2.Arr(num_vertex);
 
         int[] cell_index = {
-            0, 3, 1,
-            1, 3, 2};
+                0, 3, 1,
+                1, 3, 2
+        };
         int[] data_ind = new int[cell_index.length * N];
 
         int i_attrib = 0;
@@ -112,18 +117,13 @@ class TextMesh implements Resource {
 
         for (int j = 0; j < Ny; j++) {
             for (int i = 0; i < Nx; i++) {
-                float x = i * dx - 1.0f;
-                float y = 1.0f - (j + 1) * dy;
+                for (ivec2 off : cell_off) {
+                    float x = (i + off.x) * dx - 1.0f;
+                    float y = 1.0f + (off.y - j - 1) * dy;
 
-                for (int[] off : cell_off) {
-                    data_vert[i_attrib] = x + dx * off[0];
-                    data_cell_uv[i_attrib] = off[0];
-                    data_cell_id[i_attrib] = i;
-                    i_attrib++;
-
-                    data_vert[i_attrib] = y + dy * off[1];
-                    data_cell_uv[i_attrib] = 1 - off[1];
-                    data_cell_id[i_attrib] = j;
+                    data_vert.set(i_attrib, fvec2.of(x, y));
+                    data_cell_uv.set(i_attrib, ivec2.of(off.x, 1 - off.y));
+                    data_cell_id.set(i_attrib, ivec2.of(i, j));
                     i_attrib++;
                 }
 
@@ -134,9 +134,9 @@ class TextMesh implements Resource {
             }
         }
 
-        vert.load(data_vert);
-        cell_uv.load(data_cell_uv);
-        cell_id.load(data_cell_id);
+        vert.load(data_vert.data);
+        cell_uv.load(data_cell_uv.data);
+        cell_id.load(data_cell_id.data);
         ibo.load(data_ind);
 
         layout.attach(0, vert);
@@ -262,6 +262,7 @@ class Terminal implements Resource {
 
     public void draw() {
         pipeline.bind();
+
         glUniform2f(0, 1.0f / atlas.Nx, 1.0f / atlas.Ny);
         glUniform1f(1, 0.0f);
         glUniform2i(2, Nx, Ny);
@@ -315,8 +316,7 @@ class Terminal implements Resource {
 
         {
             List<String> lines = new ArrayList<>();
-        outer:
-            for (StringBuilder line : text.prev) {
+            outer: for (StringBuilder line : text.prev) {
                 for (String wline : line.toString().split("\n")) {
                     if (line_limit > 0)
                         break outer;
@@ -331,8 +331,7 @@ class Terminal implements Resource {
 
         {
             List<String> lines = new ArrayList<>();
-        outer:
-            for (StringBuilder line : text.next) {
+            outer: for (StringBuilder line : text.next) {
                 for (String wline : line.toString().split("\n")) {
                     if (line_limit > 0)
                         break outer;
@@ -351,8 +350,8 @@ class Terminal implements Resource {
 
         Nx = w / (font_size * atlas.glyph_x);
         dx = 2.0f / Nx;
-        dy = dx * atlas.ratio * (float)w / (float)h;
-        Ny = (int)(2.0f / dy) + 1;
+        dy = dx * atlas.ratio * (float) w / (float) h;
+        Ny = (int) (2.0f / dy) + 1;
 
         cx = 0;
         cy = 0;
@@ -362,9 +361,9 @@ class Terminal implements Resource {
     }
 
     public void writeAt(char chr, int cx, int cy) {
-        int val = (int)chr;
+        int val = (int) chr;
 
-        int[] data = {val % atlas.Nx, val / atlas.Nx};
+        int[] data = { val % atlas.Nx, val / atlas.Nx };
         int offset = 8 * (cx + Nx * cy); // I32;
 
         glyph_buffer.subload(offset, data);
@@ -372,16 +371,16 @@ class Terminal implements Resource {
 
     public void write(char chr) {
         switch (chr) {
-        case '\r':
-            cx = 0;
-            break;
-        case '\n':
-            next();
-            break;
-        default: {
-            writeAt(chr, cx, cy);
-            break;
-        }
+            case '\r':
+                cx = 0;
+                break;
+            case '\n':
+                next();
+                break;
+            default: {
+                writeAt(chr, cx, cy);
+                break;
+            }
         }
 
         cx++;
@@ -455,9 +454,9 @@ public class Main {
             win.context_focus();
             GL.createCapabilities();
 
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            glFrontFace(GL_CCW);
+            // glEnable(GL_CULL_FACE);
+            // glCullFace(GL_BACK);
+            // glFrontFace(GL_CCW);
 
             Terminal term = new Terminal();
             term.resize(800, 800);
@@ -469,7 +468,7 @@ public class Main {
             });
             GLFW.glfwSetCharCallback(win.handle, (window, codepoint) -> {
                 if (codepoint < 128) {
-                    term.write((char)codepoint);
+                    term.write((char) codepoint);
                 } else {
                     term.write('\\');
                     term.write('?');
@@ -479,31 +478,31 @@ public class Main {
             GLFW.glfwSetKeyCallback(win.handle, (window, key, scancode, action, mod) -> {
                 if (action == GLFW.GLFW_PRESS || action == GLFW.GLFW_REPEAT) {
                     switch (key) {
-                    case GLFW.GLFW_KEY_BACKSPACE:
-                    case GLFW.GLFW_KEY_DELETE:
-                        term.pop();
-                        break;
-                    case GLFW.GLFW_KEY_ENTER:
-                        term.next();
-                        break;
-                    case GLFW.GLFW_KEY_UP:
-                        term.up();
-                        break;
-                    case GLFW.GLFW_KEY_DOWN:
-                        term.down();
-                        break;
-                    case GLFW.GLFW_KEY_LEFT:
-                        term.left();
-                        break;
-                    case GLFW.GLFW_KEY_RIGHT:
-                        term.right();
-                        break;
-                    case GLFW.GLFW_KEY_ESCAPE: {
-                        toggle_fill();
-                        break;
-                    }
-                    default:
-                        break;
+                        case GLFW.GLFW_KEY_BACKSPACE:
+                        case GLFW.GLFW_KEY_DELETE:
+                            term.pop();
+                            break;
+                        case GLFW.GLFW_KEY_ENTER:
+                            term.next();
+                            break;
+                        case GLFW.GLFW_KEY_UP:
+                            term.up();
+                            break;
+                        case GLFW.GLFW_KEY_DOWN:
+                            term.down();
+                            break;
+                        case GLFW.GLFW_KEY_LEFT:
+                            term.left();
+                            break;
+                        case GLFW.GLFW_KEY_RIGHT:
+                            term.right();
+                            break;
+                        case GLFW.GLFW_KEY_ESCAPE: {
+                            toggle_fill();
+                            break;
+                        }
+                        default:
+                            break;
                     }
                 }
             });
