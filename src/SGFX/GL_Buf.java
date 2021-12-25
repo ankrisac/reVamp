@@ -1,6 +1,6 @@
 package src.SGFX;
 
-import static org.lwjgl.opengl.GL43C.*;
+import static org.lwjgl.opengl.GL20C.*;
 
 public abstract class GL_Buf extends GL_Bindable implements Buf {
     public final int target;
@@ -13,7 +13,7 @@ public abstract class GL_Buf extends GL_Bindable implements Buf {
     }
 
     public void destroy() {
-        glDeleteBuffers(handle);
+        glDeleteBuffers(gl_handle);
     }
 
     protected void bind_handle(int handle) {

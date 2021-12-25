@@ -9,6 +9,9 @@ public class VarList {
         this.len = vars.length;
     }
 
+    public VarList concat(VarList other) {
+        return VarList.of(Var.concat(this.vars, other.vars));
+    }
     public static VarList of(Var... args) {
         return new VarList(args);
     }

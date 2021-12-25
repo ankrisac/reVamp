@@ -1,5 +1,5 @@
 package src.SGFX;
-import static org.lwjgl.opengl.GL43C.*;
+import static org.lwjgl.opengl.GL31C.*;
 
 public class BindGroup extends GL_Bindable {
     public enum DrawMode {
@@ -18,7 +18,7 @@ public class BindGroup extends GL_Bindable {
     }
 
     public void destroy() {
-        glDeleteVertexArrays(handle);
+        glDeleteVertexArrays(gl_handle);
     }
 
     protected void bind_handle(int handle) {

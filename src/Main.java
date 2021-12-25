@@ -8,7 +8,7 @@ import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.GL;
 
 import src.SGFX.*;
-import src.Vec.*;
+import src.SGFX.Vec.*;
 
 class FontAtlas implements Resource, Bindable {
     public final Tex2D atlas;
@@ -19,7 +19,7 @@ class FontAtlas implements Resource, Bindable {
     public final float ratio;
 
     public FontAtlas() {
-        sampler = new Sampler(Tex.Dim.D2)
+        sampler = new Sampler(GL_Tex.Dim.D2)
                 .filter(new TexFilter(TexFilter.Fn.Nearest, TexFilter.Fn.Nearest, TexFilter.MipMap.None))
                 .wrap(new TexWrap(TexWrap.Axis.ClampBorder, TexWrap.Axis.ClampBorder));
 
@@ -29,9 +29,7 @@ class FontAtlas implements Resource, Bindable {
 
         N = i32x2.of(16, 8);
 
-        int[] size = atlas.getSize();
-
-        glyph = i32x2.of(size[0], size[1]).div(N);
+        glyph = atlas.getSize().div(N);
         ratio = glyph.f().grad();
     }
 
@@ -60,7 +58,7 @@ class TextMesh implements Resource {
 
     public TextMesh() {
         ibo = new u32x1.Index(BufFmt.Usage.Draw, 32);
-        
+
         vert = new f32x2.Attrib(BufFmt.Usage.MutDraw, 32);
         cell_uv = new i32x2.Attrib(BufFmt.Usage.MutDraw, 32);
         cell_id = new i32x2.Attrib(BufFmt.Usage.MutDraw, 32);
@@ -204,22 +202,16 @@ class Terminal implements Resource {
     private Pipeline pipeline;
     private FontAtlas atlas;
     private TextMesh mesh;
-    private i32x2.Storage glyph_buffer;
     private TextBuffer text;
 
-    private int Nx;
-    private int Ny;
+    private i32x2.Storage glyph_buffer = new i32x2.Storage(BufFmt.Usage.MutDraw, 64);
 
-    private float dx;
-    private float dy;
-
-    private i32x2 cell = i32x2.of(0, 0);
-
-    private int origin_y;
+    private final i32x2 N = i32x2.of(0, 0);
+    private final f32x2 ds = f32x2.of(0.0f, 0.0f);
+    private final i32x2 cell = i32x2.of(0, 0);
+    private final i32x2 origin = i32x2.of(0, 0);
 
     public Terminal() throws IOException {
-        glyph_buffer = new i32x2.Storage(BufFmt.Usage.MutDraw, 64);
-
         text = new TextBuffer();
 
         text.prev.add(new StringBuilder("1. hello world"));
@@ -232,8 +224,6 @@ class Terminal implements Resource {
         text.next.add(new StringBuilder("5. hello world"));
         text.next.add(new StringBuilder("6. hello world"));
         text.next.add(new StringBuilder("7. hello world"));
-
-        origin_y = 0;
 
         mesh = new TextMesh();
         atlas = new FontAtlas();
@@ -254,8 +244,8 @@ class Terminal implements Resource {
 
         atlas.N.f().inv().bind(0);
         f32x2.of(0.0f, 0.0f).bind(1);
-        i32x2.of(Nx, Ny).bind(2);
-        i32x2.of(0, origin_y).bind(3);
+        N.bind(2);
+        origin.bind(3);
 
         glyph_buffer.set_binding(0);
 
@@ -268,16 +258,16 @@ class Terminal implements Resource {
     }
 
     public void meshWriteLine(i32x2.Arr arr_glyph, int j, String line) {
-        for (int i = 0; i < Math.min(line.length(), Nx); i++) {
+        for (int i = 0; i < Math.min(line.length(), N.x); i++) {
             char chr = line.charAt(i);
-            int index = (i + j * Nx);
+            int index = (i + j * N.x);
             arr_glyph.set(index, i32x2.of(chr % atlas.N.x, chr / atlas.N.x));
         }
     }
 
     public int meshWrite(i32x2.Arr arr_glyph, int j, List<String> lines) {
         for (String line : lines) {
-            if (j >= Ny)
+            if (j >= N.y)
                 break;
             meshWriteLine(arr_glyph, j++, line);
         }
@@ -285,19 +275,19 @@ class Terminal implements Resource {
     }
 
     public void refresh_mesh() {
-        int N = Nx * Ny;
-        glyph_buffer.local.resize(N);
+        int n = N.prod();
+        glyph_buffer.local.resize(n);
         {
             char space = ' ';
             i32x2 off = i32x2.of(space % atlas.N.x, space / atlas.N.x);
 
-            for (int i = 0; i < N; i++) {
+            for (int i = 0; i < n; i++) {
                 glyph_buffer.local.set(i, off);
             }
         }
 
         int j = 0;
-        int line_limit = Ny;
+        int line_limit = N.y;
 
         {
             List<String> lines = new ArrayList<>();
@@ -329,30 +319,26 @@ class Terminal implements Resource {
         glyph_buffer.update();
     }
 
-    public void resize(int w, int h) {
+    public void resize(i32x2 dim) {
         int font_size = 2;
 
-        Nx = w / (font_size * atlas.glyph.x);
-        dx = 2.0f / Nx;
-        dy = dx * atlas.ratio * (float) w / (float) h;
-        Ny = (int) (2.0f / dy) + 1;
+        N.x = dim.x / (font_size * atlas.glyph.x);
+        ds.x = 2.0f / N.x;
+        ds.y = ds.x * atlas.ratio / dim.f().grad();
+        N.y = (int) (2.0f / ds.y) + 1;
 
-        cell.x = 0;
-        cell.y = 0;
+        cell.reset();
 
         refresh_mesh();
-        mesh.resize(i32x2.of(Nx, Ny), f32x2.of(dx, dy));
+        mesh.resize(N, ds);
     }
 
     public void writeAt(char chr, i32x2 c) {
         int val = (int) chr;
 
-        i32x2.Arr data = new i32x2.Arr(1);
-        data.set(0, val % atlas.N.x, val / atlas.N.x);
-
-        int index = 8 * (c.x + Nx * c.y); // I32;
-
-        glyph_buffer.update(data, index, 0);
+        glyph_buffer.update_range(
+                i32x2.of(val % atlas.N.x, val / atlas.N.x),
+                8 * c.dot(1, N.x));
     }
 
     public void write(char chr) {
@@ -370,7 +356,7 @@ class Terminal implements Resource {
         }
 
         cell.x++;
-        if (cell.x >= Nx) {
+        if (cell.x >= N.x) {
             next();
         }
     }
@@ -411,7 +397,7 @@ class Terminal implements Resource {
 
     public void right() {
         writeAt(' ', cell);
-        if (cell.x < Nx - 1) {
+        if (cell.x < N.x - 1) {
             cell.x++;
         }
     }
@@ -446,12 +432,11 @@ public class Main {
             glFrontFace(GL_CCW);
 
             Terminal term = new Terminal();
-            term.resize(800, 800);
+            term.resize(i32x2.of(800, 800));
 
             GLFW.glfwSetWindowSizeCallback(win.handle, (window, w, h) -> {
-                int[] dim = win.getSize();
-                glViewport(0, 0, dim[0], dim[1]);
-                term.resize(w, h);
+                glViewport(0, 0, w, h);
+                term.resize(i32x2.of(w, h));
             });
             GLFW.glfwSetCharCallback(win.handle, (window, codepoint) -> {
                 if (codepoint < 128) {

@@ -1,8 +1,8 @@
 package src.SGFX;
 
-import static org.lwjgl.opengl.GL43C.*;
+import static org.lwjgl.opengl.GL12C.*;
 
-public class Tex extends GL_Bindable {
+public class GL_Tex extends GL_Bindable {
     public enum Dim {
         D1(GL_TEXTURE_1D),
         D2(GL_TEXTURE_2D),
@@ -17,13 +17,13 @@ public class Tex extends GL_Bindable {
     
     public final Dim dim;
 
-    public Tex(Dim dim) {
+    public GL_Tex(Dim dim) {
         super(glGenTextures());
         this.dim = dim;
     }
 
     public void destroy() {
-        glDeleteTextures(handle);
+        glDeleteTextures(gl_handle);
     }
 
     protected void bind_handle(int handle) {

@@ -1,14 +1,14 @@
 package src.SGFX;
 
-import static org.lwjgl.opengl.GL43C.*;
+import static org.lwjgl.opengl.GL33C.*;
 
 public class Sampler extends GL_Object {
-    public Sampler(Tex.Dim dim) {
+    public Sampler(GL_Tex.Dim dim) {
         super(glGenSamplers());
     }
 
     public Sampler border(float color[]) {
-        glSamplerParameterfv(handle, GL_TEXTURE_BORDER_COLOR, color);
+        glSamplerParameterfv(gl_handle, GL_TEXTURE_BORDER_COLOR, color);
         return this;
     }
 
@@ -29,14 +29,14 @@ public class Sampler extends GL_Object {
     }
 
     public void destroy() {
-        glDeleteSamplers(handle);
+        glDeleteSamplers(gl_handle);
     }
 
     public void setParam(int param, int value) {
-        glSamplerParameteri(handle, param, value);
+        glSamplerParameteri(gl_handle, param, value);
     }
 
     public void bind(int index) {
-        glBindSampler(index, handle);
+        glBindSampler(index, gl_handle);
     }
 }

@@ -1,6 +1,6 @@
 package src.SGFX;
 
-import static org.lwjgl.opengl.GL43C.*;
+import static org.lwjgl.opengl.GL20C.*;
 
 public class TexWrap {
     public enum Axis {
