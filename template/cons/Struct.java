@@ -61,11 +61,48 @@ public class Struct extends Node {
         }
     }
 
+    public final String parent_class;
+    public final String[] interfaces;
+
     public final String name;
     public final Block body;
 
+    private Struct(String name, String parent_class, String... interfaces) {
+        this.name = name;
+        this.parent_class = parent_class;
+        this.interfaces = interfaces;
+
+        String header = "class " + name;
+        if(parent_class.length() > 0) {
+            header += " extends " + parent_class;
+        }
+        if(interfaces.length > 0) {
+            header += " implements ";
+            for(String inf : interfaces) {
+                if(inf.length() == 0) {
+                    throw new RuntimeException("Empty interface");
+                }
+                header += inf;
+            }
+        }
+
+        this.body = new Block(header);
+    }
+    public static Struct of(String name, String... interfaces) {
+        return new Struct(name, "", interfaces);
+    }
+    public static Struct subclass(String name, String parent, String... interfaces) {
+        if(parent.length() == 0) {
+            throw new RuntimeException("empty parent");
+        }
+        return new Struct(name, parent, interfaces);
+    }
+    
     public Struct(String name) {
         this.name = name;
+        this.parent_class = "";
+        this.interfaces = new String[0];
+
         this.body = new Block("class " + name);
     }
 

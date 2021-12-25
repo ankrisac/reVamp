@@ -4,36 +4,14 @@ import static org.lwjgl.opengl.GL43C.*;
 
 public class BufFmt {
     public enum Type {
-        U8(GL_UNSIGNED_BYTE),
-        U16(GL_UNSIGNED_SHORT),
         U32(GL_UNSIGNED_INT),
-    
-        I8(GL_BYTE),
-        I16(GL_SHORT),
         I32(GL_INT),
-    
-        F16(GL_HALF_FLOAT),
-        F32(GL_FLOAT),
-        F64(GL_DOUBLE);
-    
+        F32(GL_FLOAT);
+         
         public final int gl_value;
     
         private Type(int value) {
             gl_value = value;
-        }
-    
-        public void expect(Type... types) {
-            for (Type type : types) {
-                if (this == type) {
-                    return;
-                }
-            }
-    
-            String err = "";
-            for (Type type : types) {
-                err += type.toString() + ", ";
-            }
-            throw new RuntimeException("Expected " + err);
         }
     }    
 

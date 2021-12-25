@@ -21,6 +21,20 @@ public class VarList {
         return new VarList(args);
     }
 
+    public Type getScalar() {
+        if (len == 0) {
+            throw new RuntimeException("Empty VarList has no Scalar");
+        }
+        Type scalar = vars[0].type;
+        for (Var var : vars) {
+            if (scalar.name != var.type.name) {
+                throw new RuntimeException("VarList has multiple types, so Scalar does not exist");
+            }
+        }
+        return scalar;
+    }
+
+
     public interface MapStr {
         public String apply(Var var);
     }
@@ -97,18 +111,5 @@ public class VarList {
 
     public void foreach(MapEffect map) {
         foreach((i, x) -> map.apply(x));
-    }
-
-    public Type getScalar() {
-        if (len == 0) {
-            throw new RuntimeException("Empty VarList has no Scalar");
-        }
-        Type scalar = vars[0].type;
-        for (Var var : vars) {
-            if (scalar.name != var.type.name) {
-                throw new RuntimeException("VarList has multiple types, so Scalar does not exist");
-            }
-        }
-        return scalar;
     }
 }

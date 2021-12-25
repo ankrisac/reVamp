@@ -27,4 +27,15 @@ public class Var extends Symbol {
     public VarList lst() {
         return VarList.of(this);
     }
+    public static Var[] concat(Var[] a, Var[] b) {
+        Var[] total = new Var[a.length + b.length];
+        int i = 0;
+        for (Var elem : a) {
+            total[i++] = elem;
+        }
+        for (Var elem : b) {
+            total[i++] = elem;
+        }
+        return total;
+    }
 }

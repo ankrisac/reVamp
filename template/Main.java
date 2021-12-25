@@ -1,24 +1,25 @@
 package template;
 
 import java.nio.file.*;
-
 import template.cons.*;
 
 class TemplateVec {
+    public final String gl_type;
     public final VarList comps;
     public final Type type;
     public final Type scalar;
     public final Struct struct;
 
     public TemplateVec(String name, VarList comps) {
+        this.gl_type = name.toUpperCase();
         this.comps = comps;
-        this.struct = new Struct(name);
+        this.struct = Struct.of(name + "x" + comps.len);
         this.type = struct.getType();
         this.scalar = comps.getScalar();
     }
 
     public Struct compile_arr() {
-        Struct out = new Struct("Arr");
+        Struct out = Struct.of("Arr");
         Var data = Type.of(scalar.name + "[]").var("data");
 
         String new_arr = "new " + scalar.name + "[" + comps.len + " * N]";
@@ -28,15 +29,22 @@ class TemplateVec {
         out.add(Fn.of("size", Type.Size, VarList.of(), Ln.ret("data.length / " + comps.len)));
 
         {
-            Node[] copy = {
+            Node[] inner = {
                     Ln.of(data.type.name, " new_data = ", new_arr),
-                    Ln.of("System.arraycopy(new_data, 0, data, 0, data.length)"),
+                    Ln.of("System.arraycopy(data, 0, new_data, 0, Math.min(data.length, new_data.length))"),
                     Ln.of("data = new_data")
             };
-            Node block = Block.If("N > size()", copy);
 
-            out.add(Fn.of("resize", Type.Void, Type.Size.vars("N"), block));
+            out.add(Fn.of("resize", Type.Void, Type.Size.vars("N"), inner));
         }
+
+        {
+            Node body = Ln.of("System.arraycopy(other, " + comps.len, " * index + offset, data, 0, other.length)");
+            VarList args = VarList.of(Type.of(scalar.name + "[]").var("other"), Type.Size.var("index"),
+                    Type.Size.var("offset"));
+            out.add(Fn.of("set", Type.Void, args, body));
+        }
+
         {
             Node body = Ln.of("System.arraycopy(other.data, " + comps.len, " * index + offset, data, 0, other.size())");
             VarList args = VarList.of(out.getType().var("other"), Type.Size.var("index"), Type.Size.var("offset"));
@@ -50,6 +58,13 @@ class TemplateVec {
         }
 
         {
+            Var[] begin = { Type.Size.var("index") };
+            VarList args = VarList.of(Var.concat(begin, comps.vars));
+            Node[] body = comps.map((i, x) -> Ln.of("data[" + comps.len, " * index + " + i, "] = ", x.name));
+            out.add(Fn.of("set", Type.Void, args, body));
+        }
+
+        {
             String fargs = comps.maptuple((i, x) -> "data[" + comps.len + " * index + " + i + "]");
             Node fbody = Ln.ret("new ", type.name, fargs);
             out.add(Fn.of("get", type, Type.Size.vars("index"), fbody));
@@ -57,8 +72,39 @@ class TemplateVec {
         return out;
     }
 
-    public Struct compile_buf() {
-        Struct out = new Struct("Buf");
+    public Struct compile_buf(Type Fmt_usage, Struct arr) {
+        Struct out = Struct.subclass("Buf", "GL_Buf");
+        out.add_var(arr.getType().var("local"));
+        {
+            VarList args = VarList.of(Type.Size.var("target"), Fmt_usage.var("usage"));
+
+            String Block = "BufFmt.Type." + gl_type + ", " + comps.len + ", usage";
+
+            out.add_mk(args, Ln.of("super(target, BufFmt.Block(", Block, "))"));
+        }
+
+        out.add(Fn.of("getLen", Type.Size, VarList.of(), Ln.ret("local.size()")));
+
+        {
+            Ln[] lines = {
+                    Ln.of("bind()"),
+                    Ln.of("glBufferData(target, local.data, fmt.usage.gl_value)"),
+                    Ln.of("unbind()")
+            };
+            out.add(Fn.of("update", Type.Void, VarList.of(), lines));
+        }
+
+        {
+            VarList args = VarList.of(arr.getType().var("data"), Type.Size.var("index"), Type.Size.var("offset"));
+            Ln[] lines = {
+                    Ln.of("bind()"),
+                    Ln.of("local.set(data, index, offset)"),
+                    Ln.of("glBufferSubData(target, ", comps.len + "*index + offset, data.data)"),
+                    Ln.of("unbind()"),
+            };
+            out.add(Fn.of("update", Type.Void, args, lines));
+        }
+
         return out;
     }
 
@@ -76,12 +122,12 @@ class TemplateVec {
     private void fn_op(String name, String op) {
         {
             VarList.MapNode fn = x -> Ln.of("this.", x.name, " ", op, "= other.", x.name);
-            fn_comp(name, type.vars("other"), fn);    
+            fn_comp(name, type.vars("other"), fn);
         }
 
         {
             VarList.MapNode fn = x -> Ln.of("this.", x.name, " ", op, "= ", x.name);
-            fn_comp(name, comps, fn);    
+            fn_comp(name, comps, fn);
         }
     }
 
@@ -93,7 +139,7 @@ class TemplateVec {
         this.struct.add(Fn.of(name, scalar, args, body));
     }
 
-    public Struct compile() {
+    public Struct compile_vec() {
         comps.foreach(x -> struct.add_var(x));
         struct.add_mk(comps, comps.map(x -> Ln.of("this.", x.name, " = ", x.name)));
 
@@ -118,7 +164,8 @@ class TemplateVec {
 
         {
             VarList arg = VarList.of();
-            fn_comp("abs", arg, x -> Ln.of(x.name, " = Math.abs(" + x.name + ")"));
+            fn_comp("abs", arg, x -> Ln.of(x.name, " = Math.abs(", x.name, ")"));
+            fn_comp("inv", arg, x -> Ln.of(x.name, " = 1/", x.name));
 
             fn_scalar("sum", arg, Ln.ret(comps.mapjoin(" + ", x -> x.name)));
             fn_scalar("prod", arg, Ln.ret(comps.mapjoin(" * ", x -> x.name)));
@@ -141,39 +188,119 @@ class TemplateVec {
             }
         }
 
-        struct.add_class(compile_arr());
+        if (comps.len == 2) {
+            fn_scalar("grad", VarList.of(), Ln.ret("y / x"));
+
+            fnPair(Fn.of("Jconj", type, VarList.of(), Ln.of("y = -y"), Ln.ret("this")));
+            fnPair(Fn.of("Jinv", type, VarList.of(),
+                    Ln.of(scalar.name, " mag = x * x + y * y"),
+                    Ln.of("x /= mag"),
+                    Ln.of("y /= mag"),
+                    Ln.ret("this")));
+            fnPair(Fn.of("Jmul", type, type.vars("other"),
+                    Ln.of(scalar.name, " a = x * other.x + y * other.y"),
+                    Ln.of(scalar.name, " b = x * other.y - y * other.x"),
+                    Ln.of("x = a"),
+                    Ln.of("y = b"),
+                    Ln.ret("this")));
+        }
+
         return struct;
     }
 
-    public static void compile(String... comps) {
-        int N = comps.length;
+    public static Struct compile(boolean can_index, String prefix, VarList comps) {
+        Struct out;
 
-        Type i32 = Type.of("int");
-        Type f32 = Type.of("float");
+        TemplateVec template = new TemplateVec(prefix, comps);
+        out = template.compile_vec();
+        Struct arr = template.compile_arr();
 
-        Struct ivec = new TemplateVec("ivec" + N, i32.vars(comps)).compile();
-        Struct fvec = new TemplateVec("fvec" + N, f32.vars(comps)).compile();
+        Type fmt_usage = Type.of("BufFmt.Usage");
+        Struct buf = template.compile_buf(fmt_usage, arr);
 
-        VarList.MapStr fn = x -> "(" + x.type.name + ")" + x.name;
-        ivec.add(Fn.of("f", fvec.getType(), VarList.of(), Ln.ret("new ", fvec.name, f32.vars(comps).maptuple(fn))));
-        fvec.add(Fn.of("i", ivec.getType(), VarList.of(), Ln.ret("new ", ivec.name, i32.vars(comps).maptuple(fn))));
+        out.add_class(arr);
+        out.add_class(buf);
+
+        VarList args = fmt_usage.vars("usage");
+        VarList binding = Type.Size.vars("binding");
 
         {
-            VarList arg = Type.Size.vars("index");
-            String inputs = "(index, " + i32.vars(comps).mapjoin(", ", x -> x.name) + ")";
+            Struct sub = Struct.subclass("Storage", "Buf", "Buf.Storage");
+            sub.add_mk(args, Ln.of("super(GL_SHADER_STORAGE_BUFFER, usage)"));
+            sub.add(Fn.of("set_binding", Type.Void, binding,
+                    Ln.of("glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, handle)")));
+            out.add_class(sub);
+        }
 
-            ivec.add(Fn.of("gl_send", Type.Void, arg, Ln.of("glUniform" + N, "i", inputs)));    
-            fvec.add(Fn.of("gl_send", Type.Void, arg, Ln.of("glUniform" + N, "f", inputs)));    
+        {
+            Struct sub = Struct.subclass("Uniform", "Buf", "Buf.Uniform");
+            sub.add_mk(args, Ln.of("super(GL_UNIFORM_BUFFER, usage)"));
+            sub.add(Fn.of("set_binding", Type.Void, binding,
+                    Ln.of("glBindBufferBase(GL_UNIFORM_BUFFER, binding, handle)")));
+            out.add_class(sub);
+        }
+
+        {
+            Struct sub = Struct.subclass("Attrib", "Buf", "Buf.Attrib");
+            sub.add_mk(args, Ln.of("super(GL_ARRAY_BUFFER, usage)"));
+            out.add_class(sub);
+        }
+
+        if (can_index) {
+            Struct sub = Struct.subclass("Index", "Buf", "Buf.Index");
+            sub.add_mk(Type.of("BufFmt.Usage").vars("usage"), Ln.of("super(GL_ELEMENT_ARRAY_BUFFER, usage)"));
+            out.add_class(sub);
+        }
+
+        return out;
+    }
+
+    public static void compile_all(String... comps) {
+        Type[] type_list = {
+                Type.of("int"),
+                Type.of("int"),
+                Type.of("float")
+        };
+
+        Struct[] vec_list = {
+                compile(true, "u32", type_list[0].vars(comps)),
+                compile(false, "i32", type_list[1].vars(comps)),
+                compile(false, "f32", type_list[2].vars(comps)),
+        };
+
+        String[] uniform_prefix = { "ui", "i", "f" };
+
+        int N = comps.length;
+        for (int i = 0; i < vec_list.length; i++) {
+            Struct vec = vec_list[i];
+            VarList arg = Type.Size.vars("index");
+            String inputs = "(index, " + Type.Void.vars(comps).mapjoin(", ", x -> x.name) + ")";
+
+            vec.add(Fn.of("bind", Type.Void, arg, Ln.of("glUniform" + N + uniform_prefix[i] + inputs)));
+
+            for (int j = 0; j < vec_list.length; j++) {
+                if (j != i) {
+                    Struct other = vec_list[j];
+                    String fn_name = other.name.substring(0, 1);
+
+                    VarList.MapStr fn = x -> "(" + x.type.name + ")" + x.name;
+                    Ln body = Ln.ret("new ", other.name, type_list[j].vars(comps).maptuple(fn));
+                    vec.add(Fn.of(fn_name, other.getType(), VarList.of(), body));
+                }
+            }
         }
 
         {
             String src = "package src.Vec;" + Node.newline;
+
+            src += "import src.SGFX.*;" + Node.newline;
             src += "import static org.lwjgl.opengl.GL43C.*;" + Node.newline;
             src += "// Generated class: Refer template/Main.java" + Node.newline;
             src += "public ";
 
-            write(src + ivec.to_str(0), ivec.name);
-            write(src + fvec.to_str(0), fvec.name);
+            for (Struct vec : vec_list) {
+                write(src + vec.to_str(0), vec.name);
+            }
         }
     }
 
@@ -181,8 +308,7 @@ class TemplateVec {
         try {
             Path path = Paths.get("src", "Vec", filename + ".java");
             Files.write(path, src.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-        }
-        catch (Exception ex) {
+        } catch (Exception ex) {
             System.out.println("Failed: " + filename);
             System.out.println(ex.getMessage());
         }
@@ -191,8 +317,9 @@ class TemplateVec {
 
 public class Main {
     public static void main(String[] args) {
-        TemplateVec.compile("x", "y");
-        TemplateVec.compile("x", "y", "z");
-        TemplateVec.compile("x", "y", "z", "w");
+        TemplateVec.compile_all("x");
+        TemplateVec.compile_all("x", "y");
+        TemplateVec.compile_all("x", "y", "z");
+        TemplateVec.compile_all("x", "y", "z", "w");
     }
 }

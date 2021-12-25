@@ -25,23 +25,16 @@ public class BindGroup extends GL_Bindable {
         glBindVertexArray(handle);
     }
 
-    public void attach(int index, BufAttrib attrib) {
+    public void attach(int index, Buf.Attrib attrib) {
         bind();
         attrib.bind();
         {
-            BufFmt fmt = attrib.fmt;
+            BufFmt fmt = attrib.getFmt();
 
             switch (fmt.type) {
-                case U8:
-                case U16:
                 case U32:
-                case I8:
-                case I16:
                 case I32:
                     glVertexAttribIPointer(index, fmt.dim, fmt.type.gl_value, fmt.padding, fmt.offset);
-                    break;
-                case F64:
-                    glVertexAttribLPointer(index, fmt.dim, fmt.type.gl_value, fmt.padding, fmt.offset);
                     break;
                 default:
                     glVertexAttribPointer(index, fmt.dim, fmt.type.gl_value, fmt.norm, fmt.padding, fmt.offset);
@@ -61,18 +54,18 @@ public class BindGroup extends GL_Bindable {
         unbind();
     }
 
-    public void draw(DrawMode mode, BufIndex index) {
+    public void draw(DrawMode mode, Buf.Index index) {
         bind();
         index.bind();
-        glDrawElements(mode.gl_value, index.getLen(), index.fmt.type.gl_value, 0);
+        glDrawElements(mode.gl_value, index.getLen(), index.getFmt().type.gl_value, 0);
         index.unbind();
         unbind();
     }
 
-    public void draw(DrawMode mode, BufIndex index, int instances) {
+    public void draw(DrawMode mode, Buf.Index index, int instances) {
         bind();
         index.bind();
-        glDrawElementsInstanced(mode.gl_value, index.getLen(), index.fmt.type.gl_value, 0, instances);
+        glDrawElementsInstanced(mode.gl_value, index.getLen(), index.getFmt().type.gl_value, 0, instances);
         index.unbind();
         unbind();
     }

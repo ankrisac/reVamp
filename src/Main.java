@@ -6,20 +6,16 @@ import java.io.IOException;
 import java.util.*;
 import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.GL;
-import src.SGFX.*;
 
+import src.SGFX.*;
 import src.Vec.*;
 
 class FontAtlas implements Resource, Bindable {
     public final Tex2D atlas;
     public final Sampler sampler;
 
-    public final int Nx;
-    public final int Ny;
-
-    public final int glyph_x;
-    public final int glyph_y;
-
+    public final i32x2 N;
+    public final i32x2 glyph;
     public final float ratio;
 
     public FontAtlas() {
@@ -31,14 +27,12 @@ class FontAtlas implements Resource, Bindable {
         atlas.load("assets/Termfont.png", false);
         sampler.bind(0);
 
-        Nx = 16;
-        Ny = 8;
+        N = i32x2.of(16, 8);
 
         int[] size = atlas.getSize();
 
-        glyph_x = size[0] / Nx;
-        glyph_y = size[1] / Ny;
-        ratio = (float) glyph_y / (float) glyph_x;
+        glyph = i32x2.of(size[0], size[1]).div(N);
+        ratio = glyph.f().grad();
     }
 
     public void destroy() {
@@ -56,20 +50,25 @@ class FontAtlas implements Resource, Bindable {
 }
 
 class TextMesh implements Resource {
-    private BufIndex ibo;
+    private u32x1.Index ibo;
 
-    private BufAttrib vert;
-    private BufAttrib cell_uv;
-    private BufAttrib cell_id;
+    private f32x2.Attrib vert;
+    private i32x2.Attrib cell_uv;
+    private i32x2.Attrib cell_id;
 
     private BindGroup layout;
 
     public TextMesh() {
-        ibo = new BufIndex(BufFmt.Block(BufFmt.Type.U32, 1, BufFmt.Usage.Draw));
+        ibo = new u32x1.Index(BufFmt.Usage.Draw);
+        ibo.local = new u32x1.Arr(32);
 
-        vert = new BufAttrib(BufFmt.Block(BufFmt.Type.F32, 2, BufFmt.Usage.MutDraw));
-        cell_uv = new BufAttrib(BufFmt.Block(BufFmt.Type.I32, 2, BufFmt.Usage.MutDraw));
-        cell_id = new BufAttrib(BufFmt.Block(BufFmt.Type.I32, 2, BufFmt.Usage.MutDraw));
+        vert = new f32x2.Attrib(BufFmt.Usage.MutDraw);
+        cell_uv = new i32x2.Attrib(BufFmt.Usage.MutDraw);
+        cell_id = new i32x2.Attrib(BufFmt.Usage.MutDraw);
+
+        vert.local = new f32x2.Arr(32);
+        cell_uv.local = new i32x2.Arr(32);
+        cell_id.local = new i32x2.Arr(32);
 
         layout = new BindGroup();
         layout.attach(0, vert);
@@ -90,51 +89,52 @@ class TextMesh implements Resource {
         layout.draw(BindGroup.DrawMode.Tris, ibo);
     }
 
-    public void resize(ivec2 N, fvec2 ds) {
+    public void resize(i32x2 N, f32x2 ds) {
         int n = N.prod();
 
-        ivec2[] cell_off = {
-                ivec2.of(0, 1),
-                ivec2.of(1, 1),
-                ivec2.of(1, 0),
-                ivec2.of(0, 0),
+        i32x2[] cell_off = {
+                i32x2.of(0, 1),
+                i32x2.of(1, 1),
+                i32x2.of(1, 0),
+                i32x2.of(0, 0),
         };
         int cell_len = cell_off.length;
         int num_vertex = cell_off.length * n;
 
-        fvec2.Arr data_vert = new fvec2.Arr(num_vertex);
-        ivec2.Arr data_cell_uv = new ivec2.Arr(num_vertex);
-        ivec2.Arr data_cell_id = new ivec2.Arr(num_vertex);
+        vert.local.resize(num_vertex);
+        cell_uv.local.resize(num_vertex);
+        cell_id.local.resize(num_vertex);
 
         int[] cell_index = {
                 0, 3, 1,
                 1, 3, 2
         };
-        int[] data_ind = new int[cell_index.length * n];
+
+        ibo.local.resize(cell_index.length * n);
 
         int i_attrib = 0;
         int i_index = 0;
 
         for (int j = 0; j < N.y; j++) {
             for (int i = 0; i < N.x; i++) {
-                for (ivec2 off : cell_off) {
-                    data_vert.set(i_attrib, off.f().cadd(i, -j - 1).mul(ds).add(-1, 1));
-                    data_cell_uv.set(i_attrib, ivec2.of(off.x, 1 - off.y));
-                    data_cell_id.set(i_attrib, ivec2.of(i, j));
+                for (i32x2 off : cell_off) {
+                    vert.local.set(i_attrib, off.f().cadd(i, -j - 1).mul(ds).add(-1, 1));
+                    cell_uv.local.set(i_attrib, off.x, 1 - off.y);
+                    cell_id.local.set(i_attrib, i, j);
                     i_attrib++;
                 }
 
                 int base = cell_len * (i + j * N.x);
                 for (int off : cell_index) {
-                    data_ind[i_index++] = base + off;
+                    ibo.local.set(i_index++, base + off);
                 }
             }
         }
 
-        vert.load(data_vert.data);
-        cell_uv.load(data_cell_uv.data);
-        cell_id.load(data_cell_id.data);
-        ibo.load(data_ind);
+        vert.update();
+        cell_uv.update();
+        cell_id.update();
+        ibo.update();
 
         layout.attach(0, vert);
         layout.attach(1, cell_uv);
@@ -209,7 +209,7 @@ class Terminal implements Resource {
     private Pipeline pipeline;
     private FontAtlas atlas;
     private TextMesh mesh;
-    private BufStorage glyph_buffer;
+    private i32x2.Storage glyph_buffer;
     private TextBuffer text;
 
     private int Nx;
@@ -218,12 +218,14 @@ class Terminal implements Resource {
     private float dx;
     private float dy;
 
-    private ivec2 cell = ivec2.of(0, 0);
+    private i32x2 cell = i32x2.of(0, 0);
 
     private int origin_y;
 
     public Terminal() throws IOException {
-        glyph_buffer = new BufStorage(BufFmt.Block(BufFmt.Type.I32, 2, BufFmt.Usage.MutDraw));
+        glyph_buffer = new i32x2.Storage(BufFmt.Usage.MutDraw);
+        glyph_buffer.local = new i32x2.Arr(1024);
+
         text = new TextBuffer();
 
         text.prev.add(new StringBuilder("1. hello world"));
@@ -256,12 +258,13 @@ class Terminal implements Resource {
     public void draw() {
         pipeline.bind();
 
-        fvec2.of(1.0f / atlas.Nx, 1.0f / atlas.Ny).gl_send(0);
-        glUniform1f(1, 0.0f);
-        ivec2.of(Nx, Ny).gl_send(2);
-        ivec2.of(0, origin_y).gl_send(3);
+        atlas.N.f().inv().bind(0);
+        f32x2.of(0.0f, 0.0f).bind(1);
+        i32x2.of(Nx, Ny).bind(2);
+        i32x2.of(0, origin_y).bind(3);
 
         glyph_buffer.set_binding(0);
+
         atlas.bind();
         mesh.draw();
         atlas.unbind();
@@ -270,15 +273,15 @@ class Terminal implements Resource {
         t = (t + 0.02f) % 1.0f;
     }
 
-    public void meshWriteLine(ivec2.Arr arr_glyph, int j, String line) {
+    public void meshWriteLine(i32x2.Arr arr_glyph, int j, String line) {
         for (int i = 0; i < Math.min(line.length(), Nx); i++) {
             char chr = line.charAt(i);
             int index = (i + j * Nx);
-            arr_glyph.set(index, ivec2.of(chr % atlas.Nx, chr / atlas.Nx));
+            arr_glyph.set(index, i32x2.of(chr % atlas.N.x, chr / atlas.N.x));
         }
     }
 
-    public int meshWrite(ivec2.Arr arr_glyph, int j, List<String> lines) {
+    public int meshWrite(i32x2.Arr arr_glyph, int j, List<String> lines) {
         for (String line : lines) {
             if (j >= Ny)
                 break;
@@ -289,13 +292,13 @@ class Terminal implements Resource {
 
     public void refresh_mesh() {
         int N = Nx * Ny;
-        ivec2.Arr arr_glyph = new ivec2.Arr(N);
+        glyph_buffer.local.resize(N);
         {
             char space = ' ';
-            ivec2 off = ivec2.of(space % atlas.Nx, space / atlas.Nx);
+            i32x2 off = i32x2.of(space % atlas.N.x, space / atlas.N.x);
 
             for (int i = 0; i < N; i++) {
-                arr_glyph.set(i, off);
+                glyph_buffer.local.set(i, off);
             }
         }
 
@@ -312,10 +315,10 @@ class Terminal implements Resource {
                 }
             }
 
-            j = meshWrite(arr_glyph, j, lines);
+            j = meshWrite(glyph_buffer.local, j, lines);
         }
 
-        meshWriteLine(arr_glyph, j, ">>" + text.current.toString());
+        meshWriteLine(glyph_buffer.local, j, ">>" + text.current.toString());
 
         {
             List<String> lines = new ArrayList<>();
@@ -327,16 +330,15 @@ class Terminal implements Resource {
                 }
             }
 
-            meshWrite(arr_glyph, j + 1, lines);
+            meshWrite(glyph_buffer.local, j + 1, lines);
         }
-
-        glyph_buffer.load(arr_glyph.data);
+        glyph_buffer.update();
     }
 
     public void resize(int w, int h) {
         int font_size = 2;
 
-        Nx = w / (font_size * atlas.glyph_x);
+        Nx = w / (font_size * atlas.glyph.x);
         dx = 2.0f / Nx;
         dy = dx * atlas.ratio * (float) w / (float) h;
         Ny = (int) (2.0f / dy) + 1;
@@ -345,16 +347,18 @@ class Terminal implements Resource {
         cell.y = 0;
 
         refresh_mesh();
-        mesh.resize(ivec2.of(Nx, Ny), fvec2.of(dx, dy));
+        mesh.resize(i32x2.of(Nx, Ny), f32x2.of(dx, dy));
     }
 
-    public void writeAt(char chr, ivec2 c) {
+    public void writeAt(char chr, i32x2 c) {
         int val = (int) chr;
 
-        int[] data = { val % atlas.Nx, val / atlas.Nx };
-        int offset = 8 * (c.x + Nx * c.y); // I32;
+        i32x2.Arr data = new i32x2.Arr(1);
+        data.set(0, val % atlas.N.x, val / atlas.N.x);
 
-        glyph_buffer.subload(offset, data);
+        int index = 8 * (c.x + Nx * c.y); // I32;
+
+        glyph_buffer.update(data, index, 0);
     }
 
     public void write(char chr) {
@@ -385,6 +389,7 @@ class Terminal implements Resource {
             cell.y--;
         }
         writeAt(' ', cell);
+
     }
 
     public void next() {
@@ -442,9 +447,9 @@ public class Main {
             win.context_focus();
             GL.createCapabilities();
 
-            // glEnable(GL_CULL_FACE);
-            // glCullFace(GL_BACK);
-            // glFrontFace(GL_CCW);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            glFrontFace(GL_CCW);
 
             Terminal term = new Terminal();
             term.resize(800, 800);
@@ -497,7 +502,7 @@ public class Main {
 
             while (win.is_open()) {
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+                glClearColor(0.0f, 0.0f, 0.14f, 1.0f);
                 term.draw();
 
                 win.swap();
