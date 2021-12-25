@@ -59,16 +59,11 @@ class TextMesh implements Resource {
     private BindGroup layout;
 
     public TextMesh() {
-        ibo = new u32x1.Index(BufFmt.Usage.Draw);
-        ibo.local = new u32x1.Arr(32);
-
-        vert = new f32x2.Attrib(BufFmt.Usage.MutDraw);
-        cell_uv = new i32x2.Attrib(BufFmt.Usage.MutDraw);
-        cell_id = new i32x2.Attrib(BufFmt.Usage.MutDraw);
-
-        vert.local = new f32x2.Arr(32);
-        cell_uv.local = new i32x2.Arr(32);
-        cell_id.local = new i32x2.Arr(32);
+        ibo = new u32x1.Index(BufFmt.Usage.Draw, 32);
+        
+        vert = new f32x2.Attrib(BufFmt.Usage.MutDraw, 32);
+        cell_uv = new i32x2.Attrib(BufFmt.Usage.MutDraw, 32);
+        cell_id = new i32x2.Attrib(BufFmt.Usage.MutDraw, 32);
 
         layout = new BindGroup();
         layout.attach(0, vert);
@@ -223,8 +218,7 @@ class Terminal implements Resource {
     private int origin_y;
 
     public Terminal() throws IOException {
-        glyph_buffer = new i32x2.Storage(BufFmt.Usage.MutDraw);
-        glyph_buffer.local = new i32x2.Arr(1024);
+        glyph_buffer = new i32x2.Storage(BufFmt.Usage.MutDraw, 64);
 
         text = new TextBuffer();
 

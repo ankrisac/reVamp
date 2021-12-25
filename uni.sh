@@ -1,9 +1,4 @@
-#!/bin/bash
 clear
-
-rm -rf .class
-mkdir -p .class
-
 
 javac template/*.java  -d .class
 java -classpath ".class" template.Main

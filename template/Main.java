@@ -74,13 +74,16 @@ class TemplateVec {
 
     public Struct compile_buf(Type Fmt_usage, Struct arr) {
         Struct out = Struct.subclass("Buf", "GL_Buf");
-        out.add_var(arr.getType().var("local"));
+        out.add(new Struct.Member(arr.getType().var("local")).set_final());
         {
-            VarList args = VarList.of(Type.Size.var("target"), Fmt_usage.var("usage"));
+            VarList args = VarList.of(Type.Size.var("target"), Fmt_usage.var("usage"), Type.Size.var("reserve"));
 
-            String Block = "BufFmt.Type." + gl_type + ", " + comps.len + ", usage";
+            Ln[] body = {
+                Ln.of("super(target, BufFmt.Block(BufFmt.Type." + gl_type + ", " + comps.len + ", usage))"),
+                Ln.of("local = new Arr(reserve)")
+            };
 
-            out.add_mk(args, Ln.of("super(target, BufFmt.Block(", Block, "))"));
+            out.add_mk(args, body);
         }
 
         out.add(Fn.of("getLen", Type.Size, VarList.of(), Ln.ret("local.size()")));
@@ -221,12 +224,12 @@ class TemplateVec {
         out.add_class(arr);
         out.add_class(buf);
 
-        VarList args = fmt_usage.vars("usage");
+        VarList args = VarList.of(fmt_usage.var("usage"), Type.Size.var("reserve"));
         VarList binding = Type.Size.vars("binding");
 
         {
             Struct sub = Struct.subclass("Storage", "Buf", "Buf.Storage");
-            sub.add_mk(args, Ln.of("super(GL_SHADER_STORAGE_BUFFER, usage)"));
+            sub.add_mk(args, Ln.of("super(GL_SHADER_STORAGE_BUFFER, usage, reserve)"));
             sub.add(Fn.of("set_binding", Type.Void, binding,
                     Ln.of("glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, handle)")));
             out.add_class(sub);
@@ -234,7 +237,7 @@ class TemplateVec {
 
         {
             Struct sub = Struct.subclass("Uniform", "Buf", "Buf.Uniform");
-            sub.add_mk(args, Ln.of("super(GL_UNIFORM_BUFFER, usage)"));
+            sub.add_mk(args, Ln.of("super(GL_UNIFORM_BUFFER, usage, reserve)"));
             sub.add(Fn.of("set_binding", Type.Void, binding,
                     Ln.of("glBindBufferBase(GL_UNIFORM_BUFFER, binding, handle)")));
             out.add_class(sub);
@@ -242,13 +245,13 @@ class TemplateVec {
 
         {
             Struct sub = Struct.subclass("Attrib", "Buf", "Buf.Attrib");
-            sub.add_mk(args, Ln.of("super(GL_ARRAY_BUFFER, usage)"));
+            sub.add_mk(args, Ln.of("super(GL_ARRAY_BUFFER, usage, reserve)"));
             out.add_class(sub);
         }
 
         if (can_index) {
             Struct sub = Struct.subclass("Index", "Buf", "Buf.Index");
-            sub.add_mk(Type.of("BufFmt.Usage").vars("usage"), Ln.of("super(GL_ELEMENT_ARRAY_BUFFER, usage)"));
+            sub.add_mk(args, Ln.of("super(GL_ELEMENT_ARRAY_BUFFER, usage, reserve)"));
             out.add_class(sub);
         }
 
