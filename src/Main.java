@@ -2,406 +2,436 @@ package src;
 
 import static org.lwjgl.opengl.GL43C.*;
 
-import java.io.IOException;
-import java.util.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+
 import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.GL;
 
 import src.SGFX.*;
 import src.SGFX.Vec.*;
 
-class FontAtlas implements Resource, Bindable {
-    public final Tex2D atlas;
-    public final Sampler sampler;
+class Font implements Resource, Bindable {
+    public final Tex2D atlas = new Tex2D();
+    public final Sampler sampler = new Sampler(GL_Tex.Dim.D2);
 
-    public final i32x2 N;
-    public final i32x2 glyph;
-    public final float ratio;
+    public final i32x2 glyph_N;
+    public final i32x2 glyph_dim;
 
-    public FontAtlas() {
-        sampler = new Sampler(GL_Tex.Dim.D2)
-                .filter(new TexFilter(TexFilter.Fn.Nearest, TexFilter.Fn.Nearest, TexFilter.MipMap.None))
-                .wrap(new TexWrap(TexWrap.Axis.ClampBorder, TexWrap.Axis.ClampBorder));
-
-        atlas = new Tex2D();
+    public Font() {
         atlas.load("assets/Termfont.png", false);
+        sampler.filter(new TexFilter(TexFilter.Fn.Nearest, TexFilter.Fn.Nearest, TexFilter.MipMap.None));
+        sampler.wrap(new TexWrap(TexWrap.Axis.Repeat, TexWrap.Axis.Repeat));
         sampler.bind(0);
 
-        N = i32x2.of(16, 8);
-
-        glyph = atlas.getSize().div(N);
-        ratio = glyph.f().grad();
+        glyph_N = i32x2.of(16, 8);
+        glyph_dim = atlas.getSize().div(glyph_N);
     }
 
     public void destroy() {
-        sampler.destroy();
-        atlas.destroy();
+        Resource.destroy(atlas, sampler);
     }
 
     public void bind() {
         atlas.bind();
+        sampler.bind(0);
     }
 
     public void unbind() {
         atlas.unbind();
     }
+
+    public void getGlyph(f32x2 px_size, int codepoint, f32x2 out_dim, f32x2 out_uv_pos, f32x2 out_uv_dim) {
+        if (codepoint >= 128) {
+            throw new RuntimeException("Multilingual code points not supported!");
+        }
+
+        out_dim.set(glyph_dim.f()).mul(px_size);
+
+        f32x2 N = glyph_N.f();
+        out_uv_pos.set(codepoint % 16, codepoint / 16).div(N);
+        out_uv_dim.set(1, 1).div(N);
+    }
 }
 
-class TextMesh implements Resource {
-    private u32x1.Index ibo;
+class Style {
+    public float font_size = 1;
+    public float inner_padding = 0;
+    
+    public final f32x4 back = f32x4.of(1, 1, 1, 1);
+    public final f32x4 fore = f32x4.of(0, 0, 0, 1);
 
-    private f32x2.Attrib vert;
-    private i32x2.Attrib cell_uv;
-    private i32x2.Attrib cell_id;
+    public final f32x2 pad = f32x2.of(0, 0);
 
-    private BindGroup layout;
+    public Style() {
+    }
 
-    public TextMesh() {
-        ibo = new u32x1.Index(BufFmt.Usage.Draw, 32);
+    public Style(Style other) {
+        this.set(other);
+    }
 
-        vert = new f32x2.Attrib(BufFmt.Usage.MutDraw, 32);
-        cell_uv = new i32x2.Attrib(BufFmt.Usage.MutDraw, 32);
-        cell_id = new i32x2.Attrib(BufFmt.Usage.MutDraw, 32);
+    public void set(Style other) {
+        this.font_size = other.font_size;
+        this.inner_padding = 0;
 
-        layout = new BindGroup();
+        this.back.set(other.back);
+        this.fore.set(other.fore);
+        this.pad.set(other.pad);
+    }
+}
+
+class UIBuilder implements Resource {
+    public final Font font = new Font();
+
+    private final int initial_size = 1024;
+    public final u32x1.Index ibo = new u32x1.Index(BufFmt.Usage.StreamDraw, initial_size);
+    public final f32x3.Attrib vert = new f32x3.Attrib(BufFmt.Usage.StreamDraw, initial_size);
+    public final f32x2.Attrib uv = new f32x2.Attrib(BufFmt.Usage.StreamDraw, initial_size);
+    public final f32x4.Attrib colback = new f32x4.Attrib(BufFmt.Usage.StreamDraw, initial_size);
+    public final f32x4.Attrib colfore = new f32x4.Attrib(BufFmt.Usage.StreamDraw, initial_size);
+
+    private boolean realloced = true;
+
+    public final BindGroup layout = new BindGroup();
+    public Pipeline pipeline;
+
+    private int ibo_index = 0;
+    private int attrib_index = 0;
+
+    public final Window parent;
+
+    public UIBuilder(Window parent) {
+        this.parent = parent;
+
+        try {
+            pipeline = new Pipeline("ui-builder", "shaders/glyph");
+        } catch (Exception ex) {
+            System.out.println("Error building UIBuilder pipeline:\n" + ex.getMessage());
+            System.exit(1);
+        }
+
         layout.attach(0, vert);
-        layout.attach(1, cell_uv);
-        layout.attach(2, cell_id);
+        layout.attach(1, uv);
+        layout.attach(2, colback);
+        layout.attach(3, colfore);
     }
 
     public void destroy() {
-        layout.destroy();
-        ibo.destroy();
+        Resource.destroy(pipeline, layout, ibo, vert, uv, font);
+    }
 
-        vert.destroy();
-        cell_uv.destroy();
-        cell_id.destroy();
+    public void start() {
+        ibo_index = 0;
+        attrib_index = 0;
+    }
+
+    public void build() {
+        ibo.update(realloced);
+        vert.update(realloced);
+        uv.update(realloced);
+        colback.update(realloced);
+        colfore.update(realloced);
     }
 
     public void draw() {
-        layout.draw(BindGroup.DrawMode.Tris, ibo);
+        Bindable.bind(pipeline, font, vert, uv);
+        layout.draw(BindGroup.DrawMode.Tris, ibo, ibo_index);
     }
 
-    public void resize(i32x2 N, f32x2 ds) {
-        int n = N.prod();
+    private int grow(int size, int min_size) {
+        if (size <= min_size) {
+            while (size < min_size) {
+                size <<= 1;
+            }
+            return size;
+        }
+        return 0;
+    }
 
-        i32x2[] cell_off = {
-                i32x2.of(0, 1),
-                i32x2.of(1, 1),
-                i32x2.of(1, 0),
-                i32x2.of(0, 0),
+    private void extend(int index, int attrib) {
+        int ibo_len = grow(ibo.local.size(), ibo_index + index);
+        if (ibo_len > 0) {
+            ibo.local.resize(ibo_len);
+        }
+
+        int attrib_len = grow(vert.local.size(), attrib_index + attrib);
+        if (attrib_len > 0) {
+            vert.local.resize(attrib_len);
+            uv.local.resize(attrib_len);
+            colback.local.resize(attrib_len);
+            colfore.local.resize(attrib_len);
+        }
+
+        realloced = true;
+    }
+
+    public void box(f32x3 pos, f32x2 dim, Style style) {
+        extend(6, 4);
+
+        int indices[] = { 0, 1, 2, 0, 2, 3 };
+
+        for (int i : indices) {
+            ibo.local.set(ibo_index++, attrib_index + i);
+        }
+
+        f32x2[] offsets = {
+                f32x2.of(0, 0),
+                f32x2.of(0, 1),
+                f32x2.of(1, 1),
+                f32x2.of(1, 0)
         };
-        int cell_len = cell_off.length;
-        int num_vertex = cell_off.length * n;
 
-        vert.local.resize(num_vertex);
-        cell_uv.local.resize(num_vertex);
-        cell_id.local.resize(num_vertex);
+        for (f32x2 off : offsets) {
+            vert.local.set(attrib_index, pos.cadd(dim.x * off.x, -dim.y * off.y, 0));
 
-        int[] cell_index = {
-                0, 3, 1,
-                1, 3, 2
-        };
+            uv.local.set(attrib_index, f32x2.zero());
+            colback.local.set(attrib_index, style.back);
+            colfore.local.set(attrib_index, style.fore);
+            attrib_index++;
+        }
+    }
 
-        ibo.local.resize(cell_index.length * n);
+    public BoxSize text(String text, f32x3 pos, f32x2 max_dim, Style style) {
+        int[] codepoint_array = text.codePoints().toArray();
+        extend(6 * codepoint_array.length, 4 * codepoint_array.length);
 
-        int i_attrib = 0;
-        int i_index = 0;
+        BoxSize size = new BoxSize(f32x2.zero(), max_dim);
 
-        for (int j = 0; j < N.y; j++) {
-            for (int i = 0; i < N.x; i++) {
-                for (i32x2 off : cell_off) {
-                    vert.local.set(i_attrib, off.f().cadd(i, -j - 1).mul(ds).add(-1, 1));
-                    cell_uv.local.set(i_attrib, off.x, 1 - off.y);
-                    cell_id.local.set(i_attrib, i, j);
-                    i_attrib++;
+        int num_glyphs = 0;
+        int attrib_begin = attrib_index;
+
+        {
+            f32x2 uv_pos = f32x2.zero();
+            f32x2 uv_dim = f32x2.zero();
+
+            f32x2 glyph_dim = f32x2.zero();
+            f32x3 glyph_pos = pos.copy();
+
+            f32x2[] offset = {
+                    f32x2.of(0, 0),
+                    f32x2.of(0, 1),
+                    f32x2.of(1, 1),
+                    f32x2.of(1, 0),
+            };
+
+            for (int codepoint : codepoint_array) {
+                if (codepoint == '\n') {
+                    glyph_pos.x = pos.x;
+                    glyph_pos.y -= glyph_dim.y;
+                    continue;
                 }
 
-                int base = cell_len * (i + j * N.x);
-                for (int off : cell_index) {
-                    ibo.local.set(i_index++, base + off);
+                font.getGlyph(parent.px().mul(style.font_size, style.font_size), codepoint, glyph_dim, uv_pos,
+                        uv_dim);
+
+                if (glyph_pos.x >= pos.x + max_dim.x) {
+                    glyph_pos.x = pos.x;
+                    glyph_pos.y -= glyph_dim.y;
+
+                    size.min_dim.x = Math.max(size.min_dim.x, glyph_pos.x - pos.x);
                 }
+                if (glyph_pos.y <= pos.y - max_dim.y) {
+                    break;
+                }
+
+                for (f32x2 off : offset) {
+                    vert.local.set(attrib_index, glyph_pos.cadd(off.x * glyph_dim.x, -off.y * glyph_dim.y, 0));
+
+                    uv.local.set(attrib_index, uv_dim.cmul(off).add(uv_pos));
+                    colback.local.set(attrib_index, style.back);
+                    colfore.local.set(attrib_index, style.fore);
+                    attrib_index++;
+                }
+
+                glyph_pos.x += glyph_dim.x;
+                num_glyphs++;
+            }
+
+            glyph_pos.y -= glyph_dim.y;
+            size.min_dim.x = Math.max(size.min_dim.x, glyph_pos.x - pos.x);
+            size.min_dim.y = pos.y - glyph_pos.y;
+        }
+
+        {
+            int[] glyph_indices = { 0, 1, 2, 0, 2, 3 };
+            for (int i = 0; i < num_glyphs; i++) {
+                for (int index : glyph_indices) {
+                    ibo.local.set(ibo_index++, attrib_begin + index);
+                }
+                attrib_begin += 4;
             }
         }
 
-        vert.update();
-        cell_uv.update();
-        cell_id.update();
-        ibo.update();
-
-        layout.attach(0, vert);
-        layout.attach(1, cell_uv);
-        layout.attach(2, cell_id);
+        return size;
     }
 }
 
-class TextBuffer {
-    public StringBuilder current;
-    public ArrayList<StringBuilder> prev;
-    public ArrayList<StringBuilder> next;
+class Profiler {
+    public double last;
+    public double[] time;
+    private int index = 0;
 
-    public int cursor;
-
-    public TextBuffer() {
-        current = new StringBuilder();
-        prev = new ArrayList<>();
-        next = new ArrayList<>();
-        cursor = 0;
+    public Profiler(int N) {
+        time = new double[N];
     }
 
-    public void moveNext() {
-        if (next.size() > 0) {
-            prev.add(current);
-            current = next.remove(0);
-            cursor = 0;
+    public void push_frame() {
+        double now = GLFW.glfwGetTime();
+        time[index] = now - last;
+        last = now;
+
+        index = (index + 1) % time.length;
+    }
+
+    public String getStats() {
+        double sum = 0;
+        double max = time[0];
+        double min = time[0];
+
+        for (int i = 0; i < time.length; i++) {
+            sum += time[i];
+            max = Math.max(max, time[i]);
+            min = Math.min(min, time[i]);
         }
-    }
 
-    public void movePrev() {
-        if (prev.size() > 0) {
-            next.add(0, current);
-            current = prev.remove(prev.size() - 1);
-            cursor = 0;
-        }
-    }
-
-    public void newLine() {
-        prev.add(current);
-        current = new StringBuilder();
-        cursor = 0;
-    }
-
-    public void deleteLine() {
-        if (prev.size() > 0) {
-            prev.remove(prev.size() - 1);
-            cursor = 0;
-        }
-    }
-
-    public char getChr() {
-        return current.charAt(cursor);
-    }
-
-    public void write(char chr) {
-        current.append(chr);
-        cursor++;
-    }
-
-    public Boolean delete() {
-        if (current.length() > 0) {
-            current.deleteCharAt(current.length() - 1);
-            cursor--;
-            return true;
-        } else {
-            return false;
-        }
+        double avg = sum / time.length;
+        return String.format("SPF %.5f [%.5f,%.5f] : FPS %3.2f", avg, min, max, 1f / avg);
     }
 }
 
-class Terminal implements Resource {
-    private Pipeline pipeline;
-    private FontAtlas atlas;
-    private TextMesh mesh;
-    private TextBuffer text;
+class BoxSize {
+    public f32x2 min_dim;
+    public f32x2 max_dim;
 
-    private i32x2.Storage glyph_buffer = new i32x2.Storage(BufFmt.Usage.MutDraw, 64);
+    public BoxSize(f32x2 min, f32x2 max) {
+        min_dim = min.copy();
+        max_dim = max.copy();
+    }
 
-    private final i32x2 N = i32x2.of(0, 0);
-    private final f32x2 ds = f32x2.of(0.0f, 0.0f);
-    private final i32x2 cell = i32x2.of(0, 0);
-    private final i32x2 origin = i32x2.of(0, 0);
+    public static BoxSize of(f32x2 min, f32x2 max) {
+        return new BoxSize(min, max);
+    }
 
-    public Terminal() throws IOException {
-        text = new TextBuffer();
+    public static BoxSize Min(f32x2 min) {
+        return new BoxSize(min, f32x2.of(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY));
+    }
+    public static BoxSize Max(f32x2 max) {
+        return new BoxSize(f32x2.zero(), max);
+    }
 
-        text.prev.add(new StringBuilder("1. hello world"));
-        text.prev.add(new StringBuilder("2. hello world"));
-        text.prev.add(new StringBuilder("3. hello world"));
-        text.prev.add(new StringBuilder("4. hello world"));
+    public static BoxSize Min(float x, float y) {
+        return new BoxSize(f32x2.of(x, y), f32x2.of(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY));
+    }
+    public static BoxSize Max(float x, float y) {
+        return new BoxSize(f32x2.zero(), f32x2.of(x, y));
+    }
+}
 
-        text.current = new StringBuilder("hello world");
+abstract class Layout {
+    public final Style style;
+    public final Root root;
+    public final Layout parent;
 
-        text.next.add(new StringBuilder("5. hello world"));
-        text.next.add(new StringBuilder("6. hello world"));
-        text.next.add(new StringBuilder("7. hello world"));
+    public Layout(Layout parent) {
+        if (parent == null) {
+            throw new RuntimeException("parent cannot be null");
+        }
 
-        mesh = new TextMesh();
-        atlas = new FontAtlas();
-        pipeline = new Pipeline("text-panel", "shaders/text");
+        this.style = new Style(parent.style);
+        this.parent = parent;
+        this.root = parent.root;
+    }
+
+    public Layout(Style root_style) {
+        this.style = root_style;
+        this.parent = null;
+        this.root = (Root) this;
+    }
+
+    abstract public BoxSize build();
+}
+
+class Root extends Layout implements Resource {
+    public final Window win;
+    public final UIBuilder builder;
+
+    public Root(Window win, Style style) {
+        super(style);
+        this.win = win;
+        this.builder = new UIBuilder(win);
     }
 
     public void destroy() {
-        pipeline.destroy();
-        atlas.destroy();
-        mesh.destroy();
-        glyph_buffer.destroy();
+        this.builder.destroy();
     }
 
-    float t = 0;
+    public BoxSize build() {
+        this.builder.build();
+        return BoxSize.of(f32x2.of(0, 0), win.size.f());
+    }
 
     public void draw() {
-        pipeline.bind();
-
-        atlas.N.f().inv().bind(0);
-        f32x2.of(0.0f, 0.0f).bind(1);
-        N.bind(2);
-        origin.bind(3);
-
-        glyph_buffer.set_binding(0);
-
-        atlas.bind();
-        mesh.draw();
-        atlas.unbind();
-        pipeline.unbind();
-
-        t = (t + 0.02f) % 1.0f;
-    }
-
-    public void meshWriteLine(i32x2.Arr arr_glyph, int j, String line) {
-        for (int i = 0; i < Math.min(line.length(), N.x); i++) {
-            char chr = line.charAt(i);
-            int index = (i + j * N.x);
-            arr_glyph.set(index, i32x2.of(chr % atlas.N.x, chr / atlas.N.x));
-        }
-    }
-
-    public int meshWrite(i32x2.Arr arr_glyph, int j, List<String> lines) {
-        for (String line : lines) {
-            if (j >= N.y)
-                break;
-            meshWriteLine(arr_glyph, j++, line);
-        }
-        return j;
-    }
-
-    public void refresh_mesh() {
-        int n = N.prod();
-        glyph_buffer.local.resize(n);
-        {
-            char space = ' ';
-            i32x2 off = i32x2.of(space % atlas.N.x, space / atlas.N.x);
-
-            for (int i = 0; i < n; i++) {
-                glyph_buffer.local.set(i, off);
-            }
-        }
-
-        int j = 0;
-        int line_limit = N.y;
-
-        {
-            List<String> lines = new ArrayList<>();
-            outer: for (StringBuilder line : text.prev) {
-                for (String wline : line.toString().split("\n")) {
-                    if (line_limit > 0)
-                        break outer;
-                    lines.add(wline);
-                }
-            }
-
-            j = meshWrite(glyph_buffer.local, j, lines);
-        }
-
-        meshWriteLine(glyph_buffer.local, j, ">>" + text.current.toString());
-
-        {
-            List<String> lines = new ArrayList<>();
-            outer: for (StringBuilder line : text.next) {
-                for (String wline : line.toString().split("\n")) {
-                    if (line_limit > 0)
-                        break outer;
-                    lines.add(wline);
-                }
-            }
-
-            meshWrite(glyph_buffer.local, j + 1, lines);
-        }
-        glyph_buffer.update();
-    }
-
-    public void resize(i32x2 dim) {
-        int font_size = 2;
-
-        N.x = dim.x / (font_size * atlas.glyph.x);
-        ds.x = 2.0f / N.x;
-        ds.y = ds.x * atlas.ratio / dim.f().grad();
-        N.y = (int) (2.0f / ds.y) + 1;
-
-        cell.reset();
-
-        refresh_mesh();
-        mesh.resize(N, ds);
-    }
-
-    public void writeAt(char chr, i32x2 c) {
-        int val = (int) chr;
-
-        glyph_buffer.update_range(
-                i32x2.of(val % atlas.N.x, val / atlas.N.x),
-                8 * c.dot(1, N.x));
-    }
-
-    public void write(char chr) {
-        switch (chr) {
-            case '\r':
-                cell.x = 0;
-                break;
-            case '\n':
-                next();
-                break;
-            default: {
-                writeAt(chr, cell);
-                break;
-            }
-        }
-
-        cell.x++;
-        if (cell.x >= N.x) {
-            next();
-        }
-    }
-
-    public void pop() {
-        writeAt(' ', cell); // Remove cursor also
-        if (cell.x > 0) {
-            cell.x--;
-        } else if (cell.y > 0) {
-            cell.y--;
-        }
-        writeAt(' ', cell);
-
-    }
-
-    public void next() {
-        writeAt(' ', cell); // Remove cursor also
-        cell.y++;
-        cell.x = 0;
-    }
-
-    public void up() {
-        text.movePrev();
-        refresh_mesh();
-    }
-
-    public void down() {
-        text.moveNext();
-        refresh_mesh();
-    }
-
-    public void left() {
-        writeAt(' ', cell);
-        if (cell.x > 0) {
-            cell.x--;
-        }
-    }
-
-    public void right() {
-        writeAt(' ', cell);
-        if (cell.x < N.x - 1) {
-            cell.x++;
-        }
+        this.builder.draw();
     }
 }
+
+abstract class AutoLayout extends Layout {
+    public final f32x3 origin;
+    public final BoxSize dim;
+    
+    public AutoLayout(Layout parent, f32x3 origin, BoxSize dim) {
+        super(parent);
+        this.origin = origin;
+        this.dim = dim;
+    }
+
+    abstract public f32x3 nextPos();
+    abstract public f32x2 nextDim();
+    abstract public void packElem(f32x2 size);
+
+    public void text(String text) {
+        addSpacer(root.builder.text(text, nextPos(), nextDim(), style));
+    }
+
+    public void addSpacer(BoxSize elem) {
+        packElem(elem.min_dim);
+    }
+
+    public BoxSize build() {
+        dim.min_dim.add(style.pad.csmul(2));
+
+        root.builder.box(origin.cadd(0, 0, 0), dim.min_dim, style);
+        return this.dim;
+    }
+}
+class Row extends AutoLayout {
+    private float offset = 0;
+    public int num_elem = 0;
+
+    Row(Layout parent, f32x3 origin, BoxSize dim) {
+        super(parent, origin, dim);
+    }
+
+    public f32x3 nextPos() {
+        num_elem++;
+        if(num_elem > 1) {
+            offset += style.inner_padding;
+        }
+        return origin.cadd(style.pad.x, -(style.pad.y + offset), 0.02f);
+    }
+
+    public f32x2 nextDim() {
+        return dim.max_dim.csub(2 * style.pad.x, offset + 2 * style.pad.y);
+    }
+
+    public void packElem(f32x2 size) {
+        offset += size.y;
+        dim.min_dim.max(size.x, offset);
+    }
+}
+
 
 public class Main {
     static public Boolean fill = true;
@@ -423,52 +453,34 @@ public class Main {
         }
 
         try {
-            Window win = new Window(500, 500, "Terminal");
-            win.context_focus();
-            GL.createCapabilities();
 
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            glFrontFace(GL_CCW);
+            Window win;
+            Root root;
+            {
+                i32x2 win_size = i32x2.val(500);
+                win = new Window(win_size, "UI Test");
+                win.context_focus();
+                GL.createCapabilities();
 
-            Terminal term = new Terminal();
-            term.resize(i32x2.of(800, 800));
+                root = new Root(win, new Style());
+            }
 
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LESS);
+
+            //glEnable(GL_CULL_FACE);
+            //glCullFace(GL_BACK);
+            //glFrontFace(GL_CCW);
+            
             GLFW.glfwSetWindowSizeCallback(win.handle, (window, w, h) -> {
                 glViewport(0, 0, w, h);
-                term.resize(i32x2.of(w, h));
+                win.size.set(w, h);
             });
-            GLFW.glfwSetCharCallback(win.handle, (window, codepoint) -> {
-                if (codepoint < 128) {
-                    term.write((char) codepoint);
-                } else {
-                    term.write('\\');
-                    term.write('?');
-                }
-            });
+            GLFW.glfwSetCharCallback(win.handle, (window, codepoint) -> {});
 
             GLFW.glfwSetKeyCallback(win.handle, (window, key, scancode, action, mod) -> {
                 if (action == GLFW.GLFW_PRESS || action == GLFW.GLFW_REPEAT) {
                     switch (key) {
-                        case GLFW.GLFW_KEY_BACKSPACE:
-                        case GLFW.GLFW_KEY_DELETE:
-                            term.pop();
-                            break;
-                        case GLFW.GLFW_KEY_ENTER:
-                            term.next();
-                            break;
-                        case GLFW.GLFW_KEY_UP:
-                            term.up();
-                            break;
-                        case GLFW.GLFW_KEY_DOWN:
-                            term.down();
-                            break;
-                        case GLFW.GLFW_KEY_LEFT:
-                            term.left();
-                            break;
-                        case GLFW.GLFW_KEY_RIGHT:
-                            term.right();
-                            break;
                         case GLFW.GLFW_KEY_ESCAPE: {
                             toggle_fill();
                             break;
@@ -479,17 +491,64 @@ public class Main {
                 }
             });
 
+            StringBuilder text = new StringBuilder();
+            for (int i = 0; i < 3000; i++) {
+                text.append((char) (Math.random() * 128));
+            }
+
+            Profiler prof = new Profiler(100);
+
+            String src = "File not found!";
+            try {
+                Path path = Paths.get("src", "Main.java");
+                src = new String(Files.readAllBytes(path));
+            } catch (Exception ex) {
+                System.out.println(ex.getMessage());
+            }
+
             while (win.is_open()) {
+                prof.push_frame();
+
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                glClearColor(0.0f, 0.0f, 0.14f, 1.0f);
-                term.draw();
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+                for (int i = 0; i < text.length(); i++) {
+                    char rand = (char) (int) (Math.random() * 128);
+                    if (Math.random() < 0.2) {
+                        rand = ' ';
+                    }
+                    text.setCharAt(i, rand);
+                }
+
+                root.builder.start();
+
+                f32x2 px = win.px();
+
+                AutoLayout row = new Row(root, f32x3.of(0, 0, 0), BoxSize.Max(f32x2.of(0.5f, 0.5f)));
+                row.style.pad.set(px.smul(4));
+                row.style.inner_padding = px.y;
+                row.text("hi");
+                row.text("hello");
+                {
+                    AutoLayout inner = new Row(row, row.nextPos(), BoxSize.Max(row.nextDim()));
+                    inner.style.back.set(0.7f, 0.7f, 0.7f, 1);
+                    inner.style.pad.set(px.csmul(4));
+                    inner.style.inner_padding = px.y;
+                    inner.text("AutoLayout inner = new Row(row, row.nextPos(), BoxSize.Max(row.nextDim()))\ninner.style.back.set(0.7f, 0.7f, 0.7f, 1);\ninner.style.pad.set(px.csmul(4));\ninner.style.inner_padding = px.y;\ninner.text(\"inner!\");\ninner.text(\"TEXT!\");\nrow.addSpacer(inner.build());");
+                    inner.text("TEXT!");
+                    row.addSpacer(inner.build());
+                }
+                row.text("world!");
+                row.build();
+
+                root.builder.build();
+                root.builder.draw();
 
                 win.swap();
                 GLFW.glfwPollEvents();
             }
 
-            term.destroy();
-            win.destroy();
+            Resource.destroy(root, win);
         } catch (Exception ex) {
             System.out.println("[Caught Exception]:\n" + ex.getMessage());
             throw ex;

@@ -11,15 +11,23 @@ public class f32x4 {
         public int size() {
             return data.length / 4;
         }
+        public static Arr of(float... data) {
+            if (data.length % 4 != 0) {
+                throw new RuntimeException("Data length must be multiple of vector dimension");
+            }
+            Arr out = new Arr(data.length);
+            out.set_unaligned(data, 0, 0);
+            return out;
+        }
         public void resize(int N) {
             float[] new_data = new float[4 * N];
             System.arraycopy(data, 0, new_data, 0, Math.min(data.length, new_data.length));
             data = new_data;
         }
-        public void set(float[] other, int index, int offset) {
+        public void set_unaligned(float[] other, int index, int offset) {
             System.arraycopy(other, 4 * index + offset, data, 0, other.length);
         }
-        public void set(Arr other, int index, int offset) {
+        public void set_unaligned(Arr other, int index, int offset) {
             System.arraycopy(other.data, 4 * index + offset, data, 0, other.size());
         }
         public void set(int index, f32x4 vec) {
@@ -39,36 +47,37 @@ public class f32x4 {
         }
     }
     public static class Buf extends GL_Buf {
-        public final Arr local;
+        public Arr local;
         public Buf(int target, BufFmt.Usage usage, int reserve) {
             super(target, BufFmt.Block(BufFmt.Type.F32, 4, usage));
             local = new Arr(reserve);
         }
-        public int getLen() {
-            return local.size();
+        public void update(boolean realloc) {
+            if (realloc) {
+                bind();
+                glBufferData(target, local.data, fmt.usage.gl_value);
+                unbind();
+            }
+            else {
+                write(local, 0);
+            }
         }
-        public void update() {
+        public void write_unaligned(float[] data, int index, int offset) {
             bind();
-            glBufferData(target, local.data, fmt.usage.gl_value);
-            unbind();
-        }
-        public void update_range_unaligned(float[] data, int index, int offset) {
-            bind();
-            local.set(data, index, offset);
             glBufferSubData(target, 4*index + offset, data);
             unbind();
         }
-        public void update_range_unaligned(Arr data, int index, int offset) {
-            update_range_unaligned(data.data, index, offset);
+        public void write_unaligned(Arr data, int index, int offset) {
+            write_unaligned(data.data, index, offset);
         }
-        public void update_range_unaligned(f32x4 data, int index, int offset) {
-            update_range_unaligned(data.as_array(), index, offset);
+        public void write_unaligned(f32x4 data, int index, int offset) {
+            write_unaligned(data.as_array(), index, offset);
         }
-        public void update_range(Arr data, int index) {
-            update_range_unaligned(data.data, index, 0);
+        public void write(Arr data, int index) {
+            write_unaligned(data.data, index, 0);
         }
-        public void update_range(f32x4 data, int index) {
-            update_range_unaligned(data.as_array(), index, 0);
+        public void write(f32x4 data, int index) {
+            write_unaligned(data.as_array(), index, 0);
         }
     }
     public float x;
@@ -81,11 +90,34 @@ public class f32x4 {
         this.z = z;
         this.w = w;
     }
+    public f32x4 copy() {
+        return new f32x4(x, y, z, w);
+    }
     public static f32x4 of(float x, float y, float z, float w) {
         return new f32x4(x, y, z, w);
     }
-    public f32x4 copy() {
-        return new f32x4(x, y, z, w);
+    public String toString() {
+        return "[" + x + "," + y + "," + z + "," + w + "]";
+    }
+    public static f32x4 zero() {
+        return of(0, 0, 0, 0);
+    }
+    public static f32x4 val(float val) {
+        return of(val, val, val, val);
+    }
+    public f32x4 set(float x, float y, float z, float w) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.w = w;
+        return this;
+    }
+    public f32x4 set(f32x4 other) {
+        this.x = other.x;
+        this.y = other.y;
+        this.z = other.z;
+        this.w = other.w;
+        return this;
     }
     public float[] as_array() {
         float[] data = { x, y, z, w };
@@ -171,6 +203,86 @@ public class f32x4 {
     public f32x4 cdiv(float x, float y, float z, float w) {
         return this.copy().div(x, y, z, w);
     }
+    public f32x4 max(f32x4 other) {
+        this.x = Math.max(this.x,other.x);
+        this.y = Math.max(this.y,other.y);
+        this.z = Math.max(this.z,other.z);
+        this.w = Math.max(this.w,other.w);
+        return this;
+    }
+    public f32x4 cmax(f32x4 other) {
+        return this.copy().max(other);
+    }
+    public f32x4 max(float x, float y, float z, float w) {
+        this.x = Math.max(this.x,x);
+        this.y = Math.max(this.y,y);
+        this.z = Math.max(this.z,z);
+        this.w = Math.max(this.w,w);
+        return this;
+    }
+    public f32x4 cmax(float x, float y, float z, float w) {
+        return this.copy().max(x, y, z, w);
+    }
+    public f32x4 min(f32x4 other) {
+        this.x = Math.min(this.x,other.x);
+        this.y = Math.min(this.y,other.y);
+        this.z = Math.min(this.z,other.z);
+        this.w = Math.min(this.w,other.w);
+        return this;
+    }
+    public f32x4 cmin(f32x4 other) {
+        return this.copy().min(other);
+    }
+    public f32x4 min(float x, float y, float z, float w) {
+        this.x = Math.min(this.x,x);
+        this.y = Math.min(this.y,y);
+        this.z = Math.min(this.z,z);
+        this.w = Math.min(this.w,w);
+        return this;
+    }
+    public f32x4 cmin(float x, float y, float z, float w) {
+        return this.copy().min(x, y, z, w);
+    }
+    public f32x4 sadd(float other) {
+        this.x += other;
+        this.y += other;
+        this.z += other;
+        this.w += other;
+        return this;
+    }
+    public f32x4 csadd(float other) {
+        return this.copy().sadd(other);
+    }
+    public f32x4 ssub(float other) {
+        this.x -= other;
+        this.y -= other;
+        this.z -= other;
+        this.w -= other;
+        return this;
+    }
+    public f32x4 cssub(float other) {
+        return this.copy().ssub(other);
+    }
+    public f32x4 smul(float other) {
+        this.x *= other;
+        this.y *= other;
+        this.z *= other;
+        this.w *= other;
+        return this;
+    }
+    public f32x4 csmul(float other) {
+        return this.copy().smul(other);
+    }
+    public f32x4 sdiv(float other) {
+        this.x /= other;
+        this.y /= other;
+        this.z /= other;
+        this.w /= other;
+        return this;
+    }
+    public f32x4 csdiv(float other) {
+        return this.copy().sdiv(other);
+    }
     public f32x4 reset() {
         x = 0;
         y = 0;
@@ -178,18 +290,12 @@ public class f32x4 {
         w = 0;
         return this;
     }
-    public f32x4 creset() {
-        return this.copy().reset();
-    }
     public f32x4 reset(float value) {
         x = value;
         y = value;
         z = value;
         w = value;
         return this;
-    }
-    public f32x4 creset(float value) {
-        return this.copy().reset(value);
     }
     public float dot(f32x4 other) {
         return x*other.x + y*other.y + z*other.z + w*other.w;

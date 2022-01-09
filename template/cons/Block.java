@@ -53,7 +53,7 @@ public class Block extends Node {
         return Block.Cond("else if", cond, inner);
     }
 
-    public static Block Else(String cond, Node... inner) {
+    public static Block Else(Node... inner) {
         return Block.of("else", inner);
     }
 

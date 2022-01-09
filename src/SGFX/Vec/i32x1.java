@@ -11,15 +11,23 @@ public class i32x1 {
         public int size() {
             return data.length / 1;
         }
+        public static Arr of(int... data) {
+            if (data.length % 1 != 0) {
+                throw new RuntimeException("Data length must be multiple of vector dimension");
+            }
+            Arr out = new Arr(data.length);
+            out.set_unaligned(data, 0, 0);
+            return out;
+        }
         public void resize(int N) {
             int[] new_data = new int[1 * N];
             System.arraycopy(data, 0, new_data, 0, Math.min(data.length, new_data.length));
             data = new_data;
         }
-        public void set(int[] other, int index, int offset) {
+        public void set_unaligned(int[] other, int index, int offset) {
             System.arraycopy(other, 1 * index + offset, data, 0, other.length);
         }
-        public void set(Arr other, int index, int offset) {
+        public void set_unaligned(Arr other, int index, int offset) {
             System.arraycopy(other.data, 1 * index + offset, data, 0, other.size());
         }
         public void set(int index, i32x1 vec) {
@@ -33,47 +41,65 @@ public class i32x1 {
         }
     }
     public static class Buf extends GL_Buf {
-        public final Arr local;
+        public Arr local;
         public Buf(int target, BufFmt.Usage usage, int reserve) {
             super(target, BufFmt.Block(BufFmt.Type.I32, 1, usage));
             local = new Arr(reserve);
         }
-        public int getLen() {
-            return local.size();
+        public void update(boolean realloc) {
+            if (realloc) {
+                bind();
+                glBufferData(target, local.data, fmt.usage.gl_value);
+                unbind();
+            }
+            else {
+                write(local, 0);
+            }
         }
-        public void update() {
+        public void write_unaligned(int[] data, int index, int offset) {
             bind();
-            glBufferData(target, local.data, fmt.usage.gl_value);
-            unbind();
-        }
-        public void update_range_unaligned(int[] data, int index, int offset) {
-            bind();
-            local.set(data, index, offset);
             glBufferSubData(target, 1*index + offset, data);
             unbind();
         }
-        public void update_range_unaligned(Arr data, int index, int offset) {
-            update_range_unaligned(data.data, index, offset);
+        public void write_unaligned(Arr data, int index, int offset) {
+            write_unaligned(data.data, index, offset);
         }
-        public void update_range_unaligned(i32x1 data, int index, int offset) {
-            update_range_unaligned(data.as_array(), index, offset);
+        public void write_unaligned(i32x1 data, int index, int offset) {
+            write_unaligned(data.as_array(), index, offset);
         }
-        public void update_range(Arr data, int index) {
-            update_range_unaligned(data.data, index, 0);
+        public void write(Arr data, int index) {
+            write_unaligned(data.data, index, 0);
         }
-        public void update_range(i32x1 data, int index) {
-            update_range_unaligned(data.as_array(), index, 0);
+        public void write(i32x1 data, int index) {
+            write_unaligned(data.as_array(), index, 0);
         }
     }
     public int x;
     public i32x1(int x) {
         this.x = x;
     }
+    public i32x1 copy() {
+        return new i32x1(x);
+    }
     public static i32x1 of(int x) {
         return new i32x1(x);
     }
-    public i32x1 copy() {
-        return new i32x1(x);
+    public String toString() {
+        return "[" + x + "]";
+    }
+    public static i32x1 zero() {
+        return of(0);
+    }
+    public static i32x1 val(int val) {
+        return of(val);
+    }
+    public i32x1 set(int x) {
+        this.x = x;
+        return this;
+    }
+    public i32x1 set(i32x1 other) {
+        this.x = other.x;
+        return this;
     }
     public int[] as_array() {
         int[] data = { x };
@@ -135,19 +161,69 @@ public class i32x1 {
     public i32x1 cdiv(int x) {
         return this.copy().div(x);
     }
+    public i32x1 max(i32x1 other) {
+        this.x = Math.max(this.x,other.x);
+        return this;
+    }
+    public i32x1 cmax(i32x1 other) {
+        return this.copy().max(other);
+    }
+    public i32x1 max(int x) {
+        this.x = Math.max(this.x,x);
+        return this;
+    }
+    public i32x1 cmax(int x) {
+        return this.copy().max(x);
+    }
+    public i32x1 min(i32x1 other) {
+        this.x = Math.min(this.x,other.x);
+        return this;
+    }
+    public i32x1 cmin(i32x1 other) {
+        return this.copy().min(other);
+    }
+    public i32x1 min(int x) {
+        this.x = Math.min(this.x,x);
+        return this;
+    }
+    public i32x1 cmin(int x) {
+        return this.copy().min(x);
+    }
+    public i32x1 sadd(int other) {
+        this.x += other;
+        return this;
+    }
+    public i32x1 csadd(int other) {
+        return this.copy().sadd(other);
+    }
+    public i32x1 ssub(int other) {
+        this.x -= other;
+        return this;
+    }
+    public i32x1 cssub(int other) {
+        return this.copy().ssub(other);
+    }
+    public i32x1 smul(int other) {
+        this.x *= other;
+        return this;
+    }
+    public i32x1 csmul(int other) {
+        return this.copy().smul(other);
+    }
+    public i32x1 sdiv(int other) {
+        this.x /= other;
+        return this;
+    }
+    public i32x1 csdiv(int other) {
+        return this.copy().sdiv(other);
+    }
     public i32x1 reset() {
         x = 0;
         return this;
     }
-    public i32x1 creset() {
-        return this.copy().reset();
-    }
     public i32x1 reset(int value) {
         x = value;
         return this;
-    }
-    public i32x1 creset(int value) {
-        return this.copy().reset(value);
     }
     public int dot(i32x1 other) {
         return x*other.x;

@@ -48,25 +48,25 @@ public class BindGroup extends GL_Bindable {
         glDisableVertexAttribArray(0);
     }
 
-    public void draw(DrawMode mode, int begin, int len) {
+    public void draw(DrawMode mode, int offset, int len) {
         bind();
-        glDrawArrays(mode.gl_value, begin, len);
+        glDrawArrays(mode.gl_value, offset, len);
         unbind();
     }
 
-    public void draw(DrawMode mode, Buf.Index index) {
+    public void draw(DrawMode mode, Buf.Index ibo, int len) {
         bind();
-        index.bind();
-        glDrawElements(mode.gl_value, index.getLen(), index.getFmt().type.gl_value, 0);
-        index.unbind();
+        ibo.bind();
+        glDrawElements(mode.gl_value, len, ibo.getFmt().type.gl_value, 0);
+        ibo.unbind();
         unbind();
     }
 
-    public void draw(DrawMode mode, Buf.Index index, int instances) {
+    public void draw(DrawMode mode, Buf.Index ibo, int len, int instances) {
         bind();
-        index.bind();
-        glDrawElementsInstanced(mode.gl_value, index.getLen(), index.getFmt().type.gl_value, 0, instances);
-        index.unbind();
+        ibo.bind();
+        glDrawElementsInstanced(mode.gl_value, len, ibo.getFmt().type.gl_value, 0, instances);
+        ibo.unbind();
         unbind();
     }
 }

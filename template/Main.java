@@ -34,13 +34,28 @@ class TemplateVec {
     }
 
     public void compile_arr() {
-        Var data = Type.of(type_scalar.name + "[]").var("data");
+        Type prim_arr = Type.of(type_scalar.name + "[]");
+        Var data = prim_arr.var("data");
 
         String new_arr = "new " + type_scalar.name + "[" + comps.len + " * N]";
 
         arr.add_var(data);
         arr.add_mk(Type.Size.vars("N"), Ln.of(data.name, " = ", new_arr));
         arr.add(Fn.of("size", Type.Size, VarList.of(), Ln.ret("data.length / " + comps.len)));
+
+        {
+
+            Node[] body = {
+                    Block.If("data.length % " + comps.len + " != 0",
+                            Ln.of("throw new RuntimeException(\"Data length must be multiple of vector dimension\")")),
+                    Ln.of("Arr out = new Arr(data.length)"),
+                    Ln.of("out.set_unaligned(data, 0, 0)"),
+                    Ln.ret("out")
+            };
+
+            Fn of = Fn.of("of", type_arr, Type.of(type_scalar.name + "...").vars("data"), body);
+            arr.add(new Struct.Member(of).set_static());
+        }
 
         {
             Node[] inner = {
@@ -52,120 +67,116 @@ class TemplateVec {
             arr.add(Fn.of("resize", Type.Void, Type.Size.vars("N"), inner));
         }
 
-        {
-            Node body = Ln.of("System.arraycopy(other, " + comps.len, " * index + offset, data, 0, other.length)");
-            VarList args = VarList.of(Type.of(type_scalar.name + "[]").var("other"), Type.Size.var("index"),
-                    Type.Size.var("offset"));
-            arr.add(Fn.of("set", Type.Void, args, body));
-        }
+        arr.add(Fn.of("set_unaligned", Type.Void,
+                VarList.of(prim_arr.var("other"), Type.Size.var("index"), Type.Size.var("offset")),
+                Ln.of("System.arraycopy(other, " + comps.len, " * index + offset, data, 0, other.length)")));
 
-        {
-            Node body = Ln.of("System.arraycopy(other.data, " + comps.len, " * index + offset, data, 0, other.size())");
-            VarList args = VarList.of(type_arr.var("other"), Type.Size.var("index"), Type.Size.var("offset"));
-            arr.add(Fn.of("set", Type.Void, args, body));
-        }
+        arr.add(Fn.of("set_unaligned", Type.Void,
+                VarList.of(type_arr.var("other"), Type.Size.var("index"), Type.Size.var("offset")),
+                Ln.of("System.arraycopy(other.data, " + comps.len, " * index + offset, data, 0, other.size())")));
 
-        {
-            VarList args = VarList.of(Type.Size.var("index"), type_vec.var("vec"));
-            Node[] body = comps.map((i, x) -> Ln.of("data[" + comps.len, " * index + " + i, "] = vec.", x.name));
-            arr.add(Fn.of("set", Type.Void, args, body));
-        }
+        arr.add(Fn.of("set", Type.Void,
+                VarList.of(Type.Size.var("index"), type_vec.var("vec")),
+                comps.map((i, x) -> Ln.of("data[" + comps.len, " * index + " + i, "] = vec.", x.name))));
 
-        {
-            VarList args = Type.Size.vars("index").concat(comps);
-            Node[] body = comps.map((i, x) -> Ln.of("data[" + comps.len, " * index + " + i, "] = ", x.name));
-            arr.add(Fn.of("set", Type.Void, args, body));
-        }
+        arr.add(Fn.of("set", Type.Void,
+                Type.Size.vars("index").concat(comps),
+                comps.map((i, x) -> Ln.of("data[" + comps.len, " * index + " + i, "] = ", x.name))));
 
         {
             String fargs = comps.maptuple((i, x) -> "data[" + comps.len + " * index + " + i + "]");
-            Node fbody = Ln.ret("new ", type_vec.name, fargs);
-            arr.add(Fn.of("get", type_vec, Type.Size.vars("index"), fbody));
+            arr.add(Fn.of("get", type_vec, Type.Size.vars("index"), Ln.ret("new ", type_vec.name, fargs)));
         }
     }
 
     public void compile_buf(Type BufFmt_Usage) {
-        buf.add(new Struct.Member(type_arr.var("local")).set_final());
+        buf.add_var(type_arr.var("local"));
+
         {
             VarList args = VarList.of(Type.Size.var("target"), BufFmt_Usage.var("usage"), Type.Size.var("reserve"));
-
             Ln[] body = {
                 Ln.of("super(target, BufFmt.Block(BufFmt.Type." + gl_type + ", " + comps.len + ", usage))"),
                 Ln.of("local = new Arr(reserve)")
             };
-
             buf.add_mk(args, body);
         }
 
-        buf.add(Fn.of("getLen", Type.Size, VarList.of(), Ln.ret("local.size()")));
-
         {
-            Ln[] body = {
+            Node[] body = {
+                Block.If("realloc", 
                     Ln.of("bind()"),
                     Ln.of("glBufferData(target, local.data, fmt.usage.gl_value)"),
-                    Ln.of("unbind()")
+                    Ln.of("unbind()")            
+                ),
+                Block.Else(
+                    Ln.of("write(local, 0)")
+                )
             };
-            buf.add(Fn.of("update", Type.Void, VarList.of(), body));
+
+            buf.add(Fn.of("update", Type.Void, Type.of("boolean").vars("realloc"), body));
         }
 
-
         VarList args_unaligned = Type.Size.vars("index", "offset");
+        VarList args_aligned = Type.Size.vars("index");
+
         {
             VarList args = Type.of(type_scalar.name + "[]").vars("data").concat(args_unaligned);
             Ln[] body = {
                     Ln.of("bind()"),
-                    Ln.of("local.set(data, index, offset)"),
                     Ln.of("glBufferSubData(target, ", comps.len + "*index + offset, data)"),
                     Ln.of("unbind()"),
             };
-            buf.add(Fn.of("update_range_unaligned", Type.Void, args, body));
+            buf.add(Fn.of("write_unaligned", Type.Void, args, body));
         }
 
-        {
-            VarList args = type_arr.vars("data").concat(args_unaligned);
-            Ln body = Ln.of("update_range_unaligned(data.data, index, offset)");
-            buf.add(Fn.of("update_range_unaligned", Type.Void, args, body));    
-        }
-        {
-            VarList args = type_vec.vars("data").concat(args_unaligned);
-            Ln body = Ln.of("update_range_unaligned(data.as_array(), index, offset)");
-            buf.add(Fn.of("update_range_unaligned", Type.Void, args, body));    
-        }
+        buf.add(Fn.of("write_unaligned", Type.Void,
+                type_arr.vars("data").concat(args_unaligned),
+                Ln.of("write_unaligned(data.data, index, offset)")));
 
-        {
-            VarList args = type_arr.vars("data").concat(Type.Size.vars("index"));
-            Ln body = Ln.of("update_range_unaligned(data.data, index, 0)");
-            buf.add(Fn.of("update_range", Type.Void, args, body));
-        }
-        {
-            VarList args = type_vec.vars("data").concat(Type.Size.vars("index"));
-            Ln body = Ln.of("update_range_unaligned(data.as_array(), index, 0)");
-            buf.add(Fn.of("update_range", Type.Void, args, body));
-        }
+        buf.add(Fn.of("write_unaligned", Type.Void,
+                type_vec.vars("data").concat(args_unaligned),
+                Ln.of("write_unaligned(data.as_array(), index, offset)")));
+
+        buf.add(Fn.of("write", Type.Void,
+                type_arr.vars("data").concat(args_aligned),
+                Ln.of("write_unaligned(data.data, index, 0)")));
+
+        buf.add(Fn.of("write", Type.Void,
+                type_vec.vars("data").concat(args_aligned),
+                Ln.of("write_unaligned(data.as_array(), index, 0)")));
     }
 
-    private void fnPair(Fn fn) {
+    private void addFnPair(Fn fn) {
         Ln body = Ln.ret("this.copy().", fn.name, fn.args.maptuple(x -> x.name));
         vec.add(fn);
         vec.add(Fn.of("c" + fn.name, fn.output, fn.args, body));
     }
 
-    private void fn_comp(String name, VarList args, VarList.MapNode fn) {
+    public void addFnVec(String name, VarList args, Node... body) {
+        vec.add(Fn.of(name, type_vec, args, body));
+    }
+
+    public void addFnScalar(String name, VarList args, Node... body) {
+        vec.add(Fn.of(name, type_scalar, args, body));
+    }
+
+    private Fn fn_comp(String name, VarList args, VarList.MapNode fn) {
         Node[] end = { Ln.ret("this") };
-        fnPair(Fn.of(name, type_vec, args, Node.concat(comps.map(fn), end)));
+        return Fn.of(name, type_vec, args, Node.concat(comps.map(fn), end));
     }
 
-    private void fn_op(String name, String op) {
-        fn_comp(name, type_vec.vars("other"), x -> Ln.of("this.", x.name, " ", op, "= other.", x.name));
-        fn_comp(name, comps, x -> Ln.of("this.", x.name, " ", op, "= ", x.name));
+    interface StrBinFn {
+        public String apply(String x, String y);
     }
-
-    public void fn_vec(String name, VarList args, Node... body) {
-        this.vec.add(Fn.of(name, type_vec, args, body));
+    private void addFnPiece(String name, StrBinFn fn) {
+        addFnPair(fn_comp(name, type_vec.vars("other"), x -> Ln.of(fn.apply("this." + x.name, "other." + x.name))));
+        addFnPair(fn_comp(name, comps, x -> Ln.of(fn.apply("this." + x.name, x.name))));
     }
-
-    public void fn_scalar(String name, VarList args, Node... body) {
-        this.vec.add(Fn.of(name, type_scalar, args, body));
+    private void addFnOp(String name, String op) {
+        addFnPiece(name, (x, y) -> x + " " + op + "= " + y);
+    }
+    private void addFnScalarOp(String name, String op) {
+        addFnPair(fn_comp(name, type_scalar.vars("other"), x -> Ln.of("this.", x.name, " ", op, "= other")));
     }
 
     public void compile_all() {
@@ -174,51 +185,72 @@ class TemplateVec {
 
         {
             Node fbody = Ln.ret("new ", type_vec.name, comps.maptuple(x -> x.name));
-            vec.add(new Struct.Member(Fn.of("of", type_vec, comps, fbody)).set_static());
             vec.add(Fn.of("copy", type_vec, VarList.of(), fbody));
+            vec.add(new Struct.Member(Fn.of("of", type_vec, comps, fbody)).set_static());
         }
+
+        vec.add(Fn.of("toString", Type.of("String"), Type.Void.vars(), Ln.ret("\"[\" + ", comps.mapjoin(" + \",\" + ", x -> x.name), " + \"]\"")));
+
+        {
+            Fn zero = Fn.of("zero", type_vec, Type.Void.vars(), Ln.ret("of", comps.maptuple(x -> "0")));
+            vec.add(new Struct.Member(zero).set_static());
+
+            Fn val = Fn.of("val", type_vec, type_scalar.vars("val"), Ln.ret("of", comps.maptuple(x -> "val")));
+            vec.add(new Struct.Member(val).set_static());
+        }
+        vec.add(fn_comp("set", comps, x -> Ln.of("this.", x.name, " = ", x.name)));
+        vec.add(fn_comp("set", type_vec.vars("other"), x -> Ln.of("this.", x.name, " = other.", x.name)));
 
         {
             Type type_array = Type.of(type_scalar.name + "[]");
             Ln[] body = {
-                Ln.of(type_array.name, " data = { ", comps.mapjoin(", ", x -> x.name), " }"),
-                Ln.ret("data")
+                    Ln.of(type_array.name, " data = { ", comps.mapjoin(", ", x -> x.name), " }"),
+                    Ln.ret("data")
             };
             vec.add(Fn.of("as_array", type_array, VarList.of(), body));
         }
 
-        fn_op("add", "+");
-        fn_op("sub", "-");
-        fn_op("mul", "*");
-        fn_op("div", "/");
+        addFnOp("add", "+");
+        addFnOp("sub", "-");
+        addFnOp("mul", "*");
+        addFnOp("div", "/");
 
-        fn_comp("reset", Type.Void.vars(), x -> Ln.of(x.name + " = 0"));
-        fn_comp("reset", type_scalar.vars("value"), x -> Ln.of(x.name + " = value"));
+        addFnPiece("max", (x, y) -> x + " = Math.max(" + x + "," + y + ")");
+        addFnPiece("min", (x, y) -> x + " = Math.min(" + x + "," + y + ")");
+        
+        addFnScalarOp("sadd", "+");
+        addFnScalarOp("ssub", "-");
+        addFnScalarOp("smul", "*");
+        addFnScalarOp("sdiv", "/");
+
+        vec.add(fn_comp("reset", Type.Void.vars(), x -> Ln.of(x.name + " = 0")));
+        vec.add(fn_comp("reset", type_scalar.vars("value"), x -> Ln.of(x.name + " = value")));
+
 
         {
             VarList arg = type_vec.vars("other");
 
-            fn_scalar("dot", arg, Ln.ret(comps.mapjoin(" + ", x -> x.name + "*other." + x.name)));
-            fn_scalar("dist", arg, Ln.ret("this.csub(other).mag()"));
-            fn_scalar("distSq", arg, Ln.ret("this.csub(other).magSq()"));
+            addFnScalar("dot", arg, Ln.ret(comps.mapjoin(" + ", x -> x.name + "*other." + x.name)));
+            addFnScalar("dist", arg, Ln.ret("this.csub(other).mag()"));
+            addFnScalar("distSq", arg, Ln.ret("this.csub(other).magSq()"));
 
             String comb_arg = comps.maptuple(x -> x.name);
 
-            fn_scalar("dot", comps, Ln.ret(comps.mapjoin(" + ", x -> x.name + "*" + x.name)));
-            fn_scalar("dist", comps, Ln.ret("this.csub", comb_arg, ".mag()"));
-            fn_scalar("distSq", comps, Ln.ret("this.csub", comb_arg, ".magSq()"));
+            addFnScalar("dot", comps, Ln.ret(comps.mapjoin(" + ", x -> x.name + "*" + x.name)));
+            addFnScalar("dist", comps, Ln.ret("this.csub", comb_arg, ".mag()"));
+            addFnScalar("distSq", comps, Ln.ret("this.csub", comb_arg, ".magSq()"));
         }
 
         {
             VarList arg = VarList.of();
-            fn_comp("abs", arg, x -> Ln.of(x.name, " = Math.abs(", x.name, ")"));
-            fn_comp("inv", arg, x -> Ln.of(x.name, " = 1/", x.name));
+            addFnPair(fn_comp("abs", arg, x -> Ln.of(x.name, " = Math.abs(", x.name, ")")));
+            addFnPair(fn_comp("inv", arg, x -> Ln.of(x.name, " = 1/", x.name)));
 
-            fn_scalar("sum", arg, Ln.ret(comps.mapjoin(" + ", x -> x.name)));
-            fn_scalar("prod", arg, Ln.ret(comps.mapjoin(" * ", x -> x.name)));
+            addFnScalar("sum", arg, Ln.ret(comps.mapjoin(" + ", x -> x.name)));
+            addFnScalar("prod", arg, Ln.ret(comps.mapjoin(" * ", x -> x.name)));
 
-            fn_scalar("magSq", arg, Ln.ret("this.dot(this)"));
-            fn_scalar("mag", arg, Ln.ret("(" + type_scalar.name + ")Math.sqrt(this.dot(this))"));
+            addFnScalar("magSq", arg, Ln.ret("this.dot(this)"));
+            addFnScalar("mag", arg, Ln.ret("(" + type_scalar.name + ")Math.sqrt(this.dot(this))"));
 
             {
                 String max = comps.vars[0].name;
@@ -230,21 +262,22 @@ class TemplateVec {
                     min = "Math.min(" + min + "," + x + ")";
                 }
 
-                fn_scalar("max", arg, Ln.ret(max));
-                fn_scalar("min", arg, Ln.ret(min));
+                addFnScalar("max", arg, Ln.ret(max));
+                addFnScalar("min", arg, Ln.ret(min));
             }
         }
 
         if (comps.len == 2) {
-            fn_scalar("grad", VarList.of(), Ln.ret("y / x"));
+            addFnScalar("grad", VarList.of(), Ln.ret("y / x"));
+            addFnScalar("invgrad", VarList.of(), Ln.ret("x / y"));
 
-            fnPair(Fn.of("Jconj", type_vec, VarList.of(), Ln.of("y = -y"), Ln.ret("this")));
-            fnPair(Fn.of("Jinv", type_vec, VarList.of(),
+            addFnPair(Fn.of("Jconj", type_vec, VarList.of(), Ln.of("y = -y"), Ln.ret("this")));
+            addFnPair(Fn.of("Jinv", type_vec, VarList.of(),
                     Ln.of(type_scalar.name, " mag = x * x + y * y"),
                     Ln.of("x /= mag"),
                     Ln.of("y /= mag"),
                     Ln.ret("this")));
-            fnPair(Fn.of("Jmul", type_vec, type_vec.vars("other"),
+            addFnPair(Fn.of("Jmul", type_vec, type_vec.vars("other"),
                     Ln.of(type_scalar.name, " a = x * other.x + y * other.y"),
                     Ln.of(type_scalar.name, " b = x * other.y - y * other.x"),
                     Ln.of("x = a"),
@@ -306,7 +339,7 @@ public class Main {
         };
 
         Struct[] vec_list = {
-                TemplateVec.compile(true, "u32", type_list[0].vars(comps)),
+                TemplateVec.compile(comps.length == 1, "u32", type_list[0].vars(comps)),
                 TemplateVec.compile(false, "i32", type_list[1].vars(comps)),
                 TemplateVec.compile(false, "f32", type_list[2].vars(comps)),
         };
@@ -346,7 +379,8 @@ public class Main {
 
                 try {
                     Path path = Paths.get("src", "SGFX", "Vec", filename);
-                    Files.write(path, (src + vec.to_str(0)).getBytes(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                    Files.write(path, (src + vec.to_str(0)).getBytes(), StandardOpenOption.CREATE,
+                            StandardOpenOption.TRUNCATE_EXISTING);
                 } catch (Exception ex) {
                     System.out.println("Failed: " + filename);
                     System.out.println(ex.getMessage());

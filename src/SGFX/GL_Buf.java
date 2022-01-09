@@ -28,5 +28,7 @@ public abstract class GL_Buf extends GL_Bindable implements Buf {
         return fmt;
     }
 
-    abstract public int getLen();
+    public int getLen() {
+        return glGetBufferParameteri(target, GL_BUFFER_SIZE);
+    }
 }

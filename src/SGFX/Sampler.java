@@ -7,25 +7,22 @@ public class Sampler extends GL_Object {
         super(glGenSamplers());
     }
 
-    public Sampler border(float color[]) {
+    public void border(float color[]) {
         glSamplerParameterfv(gl_handle, GL_TEXTURE_BORDER_COLOR, color);
-        return this;
     }
 
-    public Sampler wrap(TexWrap mode) {
+    public void wrap(TexWrap mode) {
         if (mode.r != null)
             setParam(GL_TEXTURE_WRAP_R, mode.r.gl_value);
         if (mode.s != null)
             setParam(GL_TEXTURE_WRAP_S, mode.s.gl_value);
         if (mode.t != null)
             setParam(GL_TEXTURE_WRAP_T, mode.t.gl_value);
-        return this;
     }
 
-    public Sampler filter(TexFilter filter) {
+    public void filter(TexFilter filter) {
         setParam(GL_TEXTURE_MIN_FILTER, filter.gl_min_filter);
         setParam(GL_TEXTURE_MAG_FILTER, filter.gl_mag_filter);
-        return this;
     }
 
     public void destroy() {
